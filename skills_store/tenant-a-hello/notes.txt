@@ -1,0 +1,1 @@
+tenant-a-hello 附带文件：验证多文件技能文件夹 upload 的完整性。

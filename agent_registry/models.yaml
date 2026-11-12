@@ -1,0 +1,37 @@
+# 模型注册表（设计文档 9.1 的文件化最小实现）。
+# Agent 配置只引这里的 name；禁止在 Agent 配置中直写 base_url/密钥。
+# base_url/api_key 只从环境变量读（见 gateway 的逐条目模型计划），本文件不含密钥。
+# capabilities 词表（校验强制）：tool_call / vision / reasoning。
+# 网关按能力执行切换策略（Agent 的 model.vision）：带图轮次切到
+# 标了 vision 的模型；会话历史一旦含图，不再降到无 vision 的模型。
+models:
+  - name: mock-local
+    protocol: mock
+    model: mock-1
+    capabilities: [tool_call]
+    context_size: 32768
+    status: enabled
+    note: demo 默认模型，确定性回复，无外部调用。
+  - name: mock-backup
+    protocol: mock
+    model: mock-backup-1
+    capabilities: [tool_call]
+    context_size: 32768
+    status: enabled
+    note: demo 备用模型（fallback 验证用），与 mock-local 同语义不同名。
+  - name: mock-vision
+    protocol: mock
+    model: mock-vision-1
+    capabilities: [tool_call, vision]
+    context_size: 32768
+    status: enabled
+    note: demo 视觉模型（切换策略验证用）：登记上标 vision，mock 本体只读文本。
+  - name: openai-compatible-default
+    protocol: openai_compatible
+    base_url_env: OPENAI_BASE_URL
+    model_env: OPENAI_MODEL
+    api_key_env: OPENAI_API_KEY
+    capabilities: [tool_call]
+    context_size: 32768
+    status: enabled
+    note: 环境变量齐备时启用（内网 OpenAI 兼容端点填这里对应的 env）。

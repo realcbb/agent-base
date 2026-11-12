@@ -1,0 +1,33 @@
+================================================================
+agent-base v1 smoke test
+================================================================
+[PASS] gateway health
+[PASS] service health（可信头身份）
+[PASS] 无 key 请求被拒 AUTH_FAILED -> 401 AUTH_FAILED
+[PASS] GET /v1/agents -> ['demo.echo-assistant', 'demo.vision-assistant']
+[PASS] POST /v1/sessions -> 201
+     session_id=4cfb9459ccb44920be6c2b5bbab7b5ee
+[PASS] session_id 为服务侧会话 id 透传（32 位 hex，非 ses- 前缀） -> 4cfb9459ccb44920be6c2b5bbab7b5ee
+[PASS] 普通消息 mock 回复 -> [mock] 收到：你好
+[PASS] ALLOW 工具 demo_time 直接执行 -> [mock] 工具 mcp__demo-tools__demo_time 已执行，结果：2026-11-08T14:39:44+08:00
+[PASS] ASK 工具 demo_note_write 触发确认 -> status=awaiting_confirmation
+[PASS] events 回放含 confirmation.required -> types=['run.started', 'message.delta', 'run.completed', 'run.started', 'tool.calling', 'tool.result', 'message.delta', 'run.completed', 'run.started', 'tool.calling', 'confirmation.required']
+[PASS] 批准确认后工具执行并落盘 -> reply=[mock] 工具 mcp__demo-tools__demo_note_write 已执行，结果：已写入笔记：冒烟笔记XYZ notes_file=True
+[PASS] 重启前再 park 一个 ASK 确认 -> status=awaiting_confirmation
+     restart_cid=cfm-10f9eb1b3a66
+[PASS] GET /v1/usage 有计量 -> {'tenant': 'demo-dev', 'runs': 5, 'input_tokens': 32, 'output_tokens': 96, 'token_source': 'model_reported', 'by_agent': {'demo.echo-assistant': 5}}
+[PASS] usage 流水已落库（逐调用行、字段完整） -> rows=6 db_in=32 db_out=96 sample={'id': 1, 'ts': '2026-11-08T06:39:42.645907+00:00', 'tenant': 'demo-dev', 'end_user': 'demo-user', 'agent_id': 'demo.echo-assistant', 'session_id': '4cfb9459ccb44920be6c2b5bbab7b5ee', 'run_id': 'run-3c7c24fd29dc', 'model': 'mock-1', 'input_tokens': 1, 'output_tokens': 16, 'total_tokens': 17, 'token_source': 'model_reported'}
+[PASS] 重启 gateway 后 /v1/usage 数值不变（落库生效） -> before={'tenant': 'demo-dev', 'runs': 5, 'input_tokens': 32, 'output_tokens': 96, 'token_source': 'model_reported', 'by_agent': {'demo.echo-assistant': 5}} after={'tenant': 'demo-dev', 'runs': 5, 'input_tokens': 32, 'output_tokens': 96, 'token_source': 'model_reported', 'by_agent': {'demo.echo-assistant': 5}}
+[PASS] 会话与消息历史在服务存储（直查服务 API 可见） -> service_agent=5deaa19a73004561b8515d33cc983dc9 messages=8
+[PASS] 服务侧会话状态为 awaiting_permission（parked 归服务管） -> status=awaiting_permission
+[PASS] gateway 重启后 ASK 确认走 HTTP 链路恢复并落盘 -> status=completed notes=True
+[PASS] 重启 gateway 后旧会话续聊且历史完整 -> reply=[mock] 收到：重启后继续：基座还在吗 messages 8->10
+     native: health: 200 ok
+     native: create credential: 201
+     native: create agent: 201
+     native: create session: 201
+     native: chat trigger: 200
+     native: reply: [mock] 收到：你好，原生服务
+[PASS] 原生 service 全链（凭证→Agent→会话→对话→mock 回复）
+----------------------------------------------------------------
+RESULT: ALL PASS

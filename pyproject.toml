@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-base"
+version = "0.1.0"
+description = "通用 AI 基座 v1 骨架：AgentScope 2.0 独立服务 + 薄网关对外契约 v1"
+requires-python = ">=3.11,<3.13"
+# 版本全锁定（设计文档原则 P8）。agentscope 的 app 层是可选 extra，
+# 不装 [service] 时 agentscope.app 导入即失败（缺 apscheduler），探针实测。
+dependencies = [
+    "agentscope[service,storage-sql,storage-redis]==2.0.11",
+    "fastapi==0.162.0",
+    "uvicorn==0.54.0",
+    "httpx==0.28.1",
+    "pydantic==2.14.3",
+    "pyyaml==6.0.3",
+    "mcp==2.3.0",
+    "sqlalchemy[asyncio]==2.1.8",
+    "aiosqlite==0.22.1",
+    "aiomysql==0.2.0",
+    "apscheduler==3.11.3",
+    "redis==8.1.0",
+    # K8s 工作区后端（SERVICE_WORKSPACE=k8s）用，框架懒加载
+    "kubernetes-asyncio==36.1.0",
+]
+
+[tool.setuptools]
+packages = ["common", "service", "gateway", "mcp_demo", "agent_registry"]

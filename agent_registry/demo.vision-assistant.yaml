@@ -1,0 +1,31 @@
+# 示例 Agent：多模型策略验证（主模型＋备用模型＋视觉模型）。
+# model.vision 声明带图轮次的切换目标（须在 models.yaml 登记且标 vision）。
+id: demo.vision-assistant
+version: 1
+tenant: demo-dev
+display_name: 演示多模型助手
+model:
+  primary: mock-local
+  fallback: mock-backup
+  vision: mock-vision
+  temperature: 0.3
+  max_tokens: 2048
+system_prompt_file: prompts/echo-assistant.md
+tools:
+  mcp_servers:
+    - name: demo-tools
+      allow: [demo_time, demo_note_write]
+      deny: []
+  builtin: []
+permissions:
+  max_level: ASK
+limits:
+  max_iters: 6
+  max_seconds: 60
+  max_tokens: 8192
+memory:
+  long_term: false
+  scope: none
+context:
+  compaction: auto
+eval_set: demo-basic

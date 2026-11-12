@@ -1,0 +1,16 @@
+================================================================
+agent-base async-mode smoke test
+================================================================
+[PASS] gateway health
+[PASS] service health
+[PASS] POST /v1/sessions -> 201
+[PASS] async 发消息立即 202 返回 running 句柄 -> 202 {'run_id': 'run-40d9fa35ed69', 'session_id': '52a5d414e7354941b69da0dba74679cd', 'status': 'running'} (0.0s)
+[PASS] 在途 run 可查且推进到 awaiting_confirmation -> awaiting_confirmation
+[PASS] events 含 confirmation.required -> types=['run.started', 'tool.calling', 'confirmation.required']
+[PASS] async 提交确认立即 202 返回续跑句柄 -> 202 {'run_id': 'run-425fa49e4665', 'session_id': '52a5d414e7354941b69da0dba74679cd', 'status': 'running'}
+[PASS] SSE 实时收到续跑轮 run.completed（订阅后新事件） -> sse types=[('run.started', 'run-425fa49e'), ('tool.result', 'run-425fa49e'), ('message.delta', 'run-425fa49e'), ('run.completed', 'run-425fa49e')]
+[PASS] 续跑 run completed 且笔记落盘 -> completed notes=True
+[PASS] 同步模式（默认）仍阻塞返回 completed 回复 -> completed [mock] 收到：你好
+[PASS] mode 非法值返回 400 -> 400
+
+RESULT: ALL PASS

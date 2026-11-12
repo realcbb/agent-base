@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模拟业务系统 · 智能助手</title>
+<style>
+  :root { --ink:#1c2333; --sub:#68707f; --line:#dde2ea; --accent:#175cd3; --bg:#f4f6f9; --card:#fff; --warn-bg:#fff8e6; --warn-line:#e8c96a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:var(--card); border-bottom:1px solid var(--line); padding:10px 14px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  header .title { font-weight:600; font-size:16px; margin-right:auto; }
+  header .title small { display:block; font-weight:400; color:var(--sub); font-size:12px; }
+  .chip { border:1px solid var(--line); border-radius:999px; padding:4px 10px; font-size:12px; color:var(--sub); background:#fff; }
+  select, button { font:inherit; }
+  select { padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  button { border:1px solid var(--line); background:#fff; border-radius:8px; padding:7px 12px; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.45; cursor:default; }
+  main { display:grid; grid-template-columns:1fr; gap:0; max-width:1100px; margin:0 auto; height:calc(100dvh - 57px); }
+  @media (min-width:860px){ main{ grid-template-columns:1fr 320px; } #timeline{ border-left:1px solid var(--line); } }
+  #chatPane { display:flex; flex-direction:column; min-height:0; background:var(--bg); }
+  #messages { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
+  .msg { max-width:85%; padding:9px 12px; border-radius:12px; line-height:1.55; white-space:pre-wrap; word-break:break-word; font-size:14px; }
+  .msg.user { align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:4px; }
+  .msg.bot { align-self:flex-start; background:var(--card); border:1px solid var(--line); border-bottom-left-radius:4px; }
+  .msg.sys { align-self:center; background:transparent; color:var(--sub); font-size:12px; padding:2px 8px; }
+  .msg img { max-width:180px; border-radius:8px; display:block; margin-top:6px; }
+  .confirm { align-self:stretch; background:var(--warn-bg); border:1px solid var(--warn-line); border-radius:12px; padding:12px; font-size:14px; }
+  .confirm .t { font-weight:600; margin-bottom:6px; }
+  .confirm .impact { color:#7a5b00; font-size:13px; margin:6px 0; }
+  .confirm code { background:#fff; border:1px solid var(--line); border-radius:6px; padding:1px 5px; font-size:12px; }
+  .confirm .row { display:flex; gap:8px; margin-top:8px; }
+  .confirm .done { color:var(--sub); font-size:13px; margin-top:8px; }
+  #composer { border-top:1px solid var(--line); background:var(--card); padding:10px; display:flex; gap:8px; align-items:flex-end; }
+  #text { flex:1; border:1px solid var(--line); border-radius:10px; padding:9px 10px; font:inherit; resize:none; max-height:110px; }
+  #imgChip { display:none; font-size:12px; color:var(--sub); padding:0 12px 6px; background:var(--card); }
+  #timeline { background:#fbfcfe; overflow-y:auto; padding:12px 14px; font-size:12.5px; display:none; }
+  @media (min-width:860px){ #timeline{ display:block; } }
+  #timeline.open { display:block; position:fixed; inset:auto 0 0 0; max-height:45dvh; border-top:1px solid var(--line); z-index:5; }
+  #timeline h3 { margin:0 0 8px; font-size:13px; color:var(--sub); font-weight:600; }
+  .ev { padding:6px 0; border-bottom:1px dashed var(--line); color:#39415a; }
+  .ev b { color:var(--ink); }
+  .ev .tag { display:inline-block; min-width:86px; color:var(--accent); font-weight:600; }
+  .ev.warn .tag { color:#b54708; }
+  #tlToggle { position:fixed; right:12px; bottom:86px; z-index:6; box-shadow:0 2px 10px rgba(16,24,40,.18); }
+  @media (min-width:860px){ #tlToggle{ display:none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="title">模拟业务系统<small>基座接入演示 · 页面经业务后端中继，不直连基座</small></div>
+  <span class="chip" id="meChip">登录中…</span>
+  <select id="agentSel" title="选择 Agent"></select>
+  <button id="newBtn" type="button">新会话</button>
+</header>
+<main>
+  <section id="chatPane">
+    <div id="messages"></div>
+    <div id="imgChip"></div>
+    <form id="composer">
+      <button type="button" id="imgBtn" title="发图片">图片</button>
+      <input type="file" id="imgFile" accept="image/*" hidden>
+      <textarea id="text" rows="1" placeholder="输入消息，Enter 发送"></textarea>
+      <button class="primary" id="sendBtn" type="submit">发送</button>
+    </form>
+  </section>
+  <aside id="timeline"><h3>过程事件（业务后端订阅基座事件流后转发）</h3><div id="events"></div></aside>
+</main>
+<button id="tlToggle" type="button">过程</button>
+<script>
+const $ = id => document.getElementById(id);
+const state = { agent: null, sessionId: null, es: null, pendingImage: null, repliedRuns: new Set(), renderedConfirmations: new Set(), live: false, queue: [] };
+
+function addMsg(kind, text) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + kind; d.textContent = text;
+  $('messages').appendChild(d); d.scrollIntoView({behavior:'smooth', block:'end'});
+  return d;
+}
+function addEvent(tag, text, warn) {
+  const d = document.createElement('div');
+  d.className = 'ev' + (warn ? ' warn' : '');
+  const b = document.createElement('b'); b.className = 'tag'; b.textContent = tag;
+  d.appendChild(b); d.appendChild(document.createTextNode(text));
+  $('events').prepend(d);
+}
+async function api(path, body) {
+  const r = await fetch(path, body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.code || r.status) + '：' + (j.message || '请求失败'));
+  return j;
+}
+
+function renderConfirm(ev, decidedStatus) {
+  const p = ev.payload || {};
+  if (p.confirmation_id && state.renderedConfirmations.has(p.confirmation_id)) return;
+  if (p.confirmation_id) state.renderedConfirmations.add(p.confirmation_id);
+  const card = document.createElement('div'); card.className = 'confirm';
+  const t = document.createElement('div'); t.className = 't'; t.textContent = '需要你确认';
+  card.appendChild(t);
+  (p.tool_calls || []).forEach(tc => {
+    const line = document.createElement('div');
+    const c = document.createElement('code'); c.textContent = tc.name || '工具';
+    line.appendChild(c);
+    line.appendChild(document.createTextNode(' 入参：' + JSON.stringify(tc.input ?? tc.arguments ?? {})));
+    card.appendChild(line);
+  });
+  if (p.impact) { const i = document.createElement('div'); i.className = 'impact'; i.textContent = p.impact; card.appendChild(i); }
+  const row = document.createElement('div'); row.className = 'row';
+  const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = '批准执行';
+  const no = document.createElement('button'); no.textContent = '拒绝';
+  const done = document.createElement('div'); done.className = 'done';
+  async function decide(decision) {
+    ok.disabled = no.disabled = true;
+    try {
+      const qs = new URLSearchParams({session_id: state.sessionId, confirmation_id: p.confirmation_id, decision});
+      await api('/api/confirm-get?' + qs.toString());
+      done.textContent = decision === 'approved' ? '已批准，继续执行中…' : '已拒绝。';
+    } catch (e) { done.textContent = '提交失败：' + e.message; }
+    card.appendChild(done);
+  }
+  ok.onclick = () => decide('approved'); no.onclick = () => decide('rejected');
+  row.appendChild(ok); row.appendChild(no); card.appendChild(row);
+  if (decidedStatus && decidedStatus !== 'pending') {
+    ok.disabled = no.disabled = true;
+    const d = document.createElement('div'); d.className = 'done';
+    d.textContent = (decidedStatus === 'approved' ? '已批准执行（历史记录）' : decidedStatus === 'edited' ? '已改参执行（历史记录）' : '已拒绝（历史记录）');
+    card.appendChild(d);
+  }
+  $('messages').appendChild(card); card.scrollIntoView({behavior:'smooth', block:'end'});
+}
+
+function renderHistoryItem(item) {
+  if (item.kind === 'user') {
+    const b = addMsg('user', item.text || '（图片）');
+    if (item.image) {
+      const tag = document.createElement('div');
+      tag.style.fontSize = '12px'; tag.style.opacity = '.75'; tag.textContent = '（附示例图片）';
+      b.appendChild(tag);
+    }
+  } else if (item.kind === 'assistant') {
+    if (item.run_id) state.repliedRuns.add(item.run_id);
+    addMsg('bot', item.text || '');
+  } else if (item.kind === 'confirmation') {
+    renderConfirm({payload: {confirmation_id: item.confirmation_id, tool_calls: item.tool_calls, impact: item.impact}}, item.status);
+  }
+}
+
+async function showReply(runId) {
+  if (state.repliedRuns.has(runId)) return;
+  state.repliedRuns.add(runId);
+  try {
+    const run = await api('/api/runs/' + runId);
+    if (run.status === 'failed') addMsg('sys', '这一轮失败了（模型：' + (run.model || '?') + '）');
+    else if (run.reply) addMsg('bot', run.reply);
+  } catch (e) { addMsg('sys', '取回复失败：' + e.message); }
+}
+
+function handleEvent(ev) {
+  switch (ev.type) {
+    case 'run.started': addEvent('开始', '新的一轮 · 模型 ' + (ev.payload?.model || '')); break;
+    case 'tool.calling': addEvent('调用工具', (ev.payload?.name || '') + ' ' + JSON.stringify(ev.payload?.input ?? {})); break;
+    case 'tool.result': addEvent('工具返回', String(ev.payload?.output ?? ev.payload?.result ?? '').slice(0, 120)); break;
+    case 'model.switched': addEvent('切换模型', (ev.payload?.from_entry || '') + ' → ' + (ev.payload?.to_entry || ''), true); addMsg('sys', '已自动切换到识图模型（' + (ev.payload?.to_entry || '') + '）'); break;
+    case 'confirmation.required': addEvent('待确认', ev.payload?.impact || '有工具等待确认', true); renderConfirm(ev); break;
+    case 'run.completed': addEvent('完成', '模型 ' + (ev.payload?.model || '')); showReply(ev.run_id); break;
+    case 'run.failed': addEvent('失败', ev.payload?.error || '', true); showReply(ev.run_id); break;
+    default: break;
+  }
+}
+
+function ensureEvents(sessionId) {
+  if (state.es && state.sessionId === sessionId) return;
+  if (state.es) state.es.close();
+  state.sessionId = sessionId;
+  const es = new EventSource('/api/events/' + sessionId);
+  state.es = es;
+  const route = e => {
+    let ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
+    if (state.live) handleEvent(ev); else state.queue.push(ev);
+  };
+  ['run.started', 'message.delta', 'tool.calling', 'tool.result', 'model.switched',
+   'confirmation.required', 'run.completed', 'run.failed']
+    .forEach(t => es.addEventListener(t, route));
+}
+
+async function send() {
+  const text = $('text').value.trim();
+  if (!text && !state.pendingImage) return;
+  const bubble = addMsg('user', text || '（图片）');
+  const qs = new URLSearchParams({agent_id: state.agent, text});
+  if (state.pendingImage) {
+    qs.set('sample_image', '1');
+    const tag = document.createElement('div');
+    tag.style.fontSize = '12px'; tag.style.opacity = '.75'; tag.textContent = '（附示例图片）';
+    bubble.appendChild(tag);
+    state.pendingImage = null; $('imgChip').style.display = 'none';
+  }
+  $('text').value = '';
+  try {
+    const r = await api('/api/chat-get?' + qs.toString());
+    ensureEvents(r.session_id);
+  } catch (e) { addMsg('sys', '发送失败：' + e.message); }
+}
+
+$('composer').addEventListener('submit', e => { e.preventDefault(); send(); });
+$('text').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+$('imgBtn').onclick = () => {
+  state.pendingImage = true;
+  $('imgChip').textContent = '下一条消息将附带一张示例图片（演示网关只放行 GET，图片由业务后端附带）';
+  $('imgChip').style.display = 'block';
+};
+$('agentSel').addEventListener('change', async () => {
+  state.agent = $('agentSel').value;
+  if (state.es) { state.es.close(); state.es = null; }
+  state.sessionId = null; state.repliedRuns.clear(); state.renderedConfirmations.clear();
+  $('messages').innerHTML = ''; $('events').innerHTML = '';
+  await attachSession();
+  addMsg('sys', '已切换到「' + $('agentSel').selectedOptions[0].textContent + '」，发条消息开始。');
+});
+
+// 页面一打开：先取会话、订上事件流（先入队），再拉业务侧存的
+// 展示历史渲染出来，最后把入队的实时事件放行——历史与实时
+// 靠 run/确认编号去重衔接，不重不漏。
+async function attachSession() {
+  const r = await api('/api/session-ensure?agent_id=' + encodeURIComponent(state.agent));
+  state.live = false; state.queue = [];
+  ensureEvents(r.session_id);
+  try {
+    const h = await api('/api/history?session_id=' + encodeURIComponent(r.session_id));
+    (h.items || []).forEach(renderHistoryItem);
+  } catch (e) { /* 历史拉不到不阻塞聊天 */ }
+  state.live = true;
+  const q = state.queue; state.queue = [];
+  q.forEach(handleEvent);
+}
+$('newBtn').onclick = async () => {
+  try {
+    const r = await api('/api/session-get?agent_id=' + encodeURIComponent(state.agent));
+    if (state.es) { state.es.close(); state.es = null; }
+    state.repliedRuns.clear(); state.renderedConfirmations.clear(); $('messages').innerHTML = ''; $('events').innerHTML = '';
+    state.live = true; state.queue = [];
+    ensureEvents(r.session_id);
+    addMsg('sys', '新会话已开始。');
+  } catch (e) { addMsg('sys', '开新会话失败：' + e.message); }
+};
+$('tlToggle').onclick = () => $('timeline').classList.toggle('open');
+
+(async () => {
+  try {
+    const me = await api('/api/me');
+    $('meChip').textContent = me.name + ' · ' + me.end_user;
+    const list = await api('/api/agents');
+    const sel = $('agentSel');
+    (list.agents || []).forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.id; o.textContent = a.display_name || a.id;
+      sel.appendChild(o);
+    });
+    state.agent = sel.value;
+    await attachSession();
+    addMsg('sys', '试试：随便聊一句；说「帮我记一条笔记：……」会弹出确认卡；切到多模型助手，点「图片」按钮再发送，会看到自动切模型。');
+  } catch (e) { addMsg('sys', '初始化失败：' + e.message); }
+})();
+</script>
+</body>
+</html>

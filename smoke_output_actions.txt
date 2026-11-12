@@ -1,0 +1,47 @@
+================================================================
+agent-base actions smoke test（动作清单落地验证）
+================================================================
+----------------------------------------------------------------
+阶段 0：注册表校验（三级 ALLOW/ASK/DENY）
+[PASS] 注册表校验通过（三级枚举+技能/SOP 登记） -> []
+[PASS] DENY 工具被校验直接拒绝登记使用 -> ['[deny-probe-agent] 工具 nuke 级别为 DENY（禁登），禁止登记使用']
+----------------------------------------------------------------
+阶段 1：装配三改（进程内生产装配探针）
+[PASS] app.state：channel worker 与 scheduler 均显式关闭 -> channel=False scheduler=False
+[PASS] lifespan 后运行时：scheduler 未启用、channel dispatcher 未起 -> scheduler_enabled=False dispatcher_none=True
+[PASS] 探针装配下对话全链跑通（mock 回复） -> chat_status=200
+[PASS] 模型工具清单含装配默认 MCP 的 demo_time -> tools=['AgentCreate', 'Bash', 'Edit', 'Glob', 'Grep', 'Read', 'TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate', 'TeamCreate', 'TeamDelete', 'TeamSay', 'ToolStop', 'Write', 'generate_structured_output', 'mcp__demo-tools__demo_note_write', 'mcp__demo-tools__demo_time', 'reset_tools']
+     .. Team 工具实测：['AgentCreate', 'TeamCreate', 'TeamDelete', 'TeamSay']（框架对非 worker 会话无条件挂载，无装配开关——见 NOTES）；AgentInvite 在场=False（需有 invitable 的 agent 才挂，demo 默认不挂）；Schedule* 初始 schema 在场=[]（以 schedule_tools 工具组形式挂载、默认不激活，enable_scheduler=False 只停触发不摘工具——见 NOTES）
+[PASS] AgentInvite 未挂载（demo agent 未开 invitable） -> invite=False
+[PASS] gateway health
+[PASS] service health
+----------------------------------------------------------------
+阶段 2：TenantPrefixPolicy（直查服务 API）
+[PASS] alice 建凭证 -> 201
+[PASS] 同租户 bob 能经政策读到 alice 的凭证（只读、脱敏） -> shared=[{'id': 'e0041968fc95491fa41259217fe280d7', 'updated_at': '2026-11-08T06:40:43.372165', 'created_at': '2026-11-08T06:40:43.372110', 'user_id': 'tenant-a:alice', 'data': {'type': 'mock_credential', 'name': 'policy-probe'}, 'editable': False}]
+[PASS] 异租户 carol 读不到该凭证（跨租户全拒） -> carol_creds=[]
+     .. KB 创建未成（503：{"detail":"Knowledge base feature is disabled — pass a knowledge_base_manager to create_app() to enable it."}）——本阶段以凭证为据，KB 与凭证共用同一政策合并路径
+----------------------------------------------------------------
+阶段 3：组织级凭证（系统户持有、同租户共用）
+[PASS] tenant-a 网关建会话 -> 201
+[PASS] 终端 user 会话引用系统户凭证跑通 mock 对话 -> [mock] 收到：你好
+[PASS] 组织凭证建在系统户 tenant-a:__system__ 名下 -> {'id': '44372ee34c714b1abc737a53959100ba', 'updated_at': '2026-11-08T06:40:43.494117', 'created_at': '2026-11-08T06:40:43.494087', 'user_id': 'tenant-a:__system__', 'data': {'id': '44372ee34c714b1abc737a53959100ba', 'name': 'mock', 'type': 'mock_credential'}, 'editable': True}
+[PASS] 终端用户 dave 名下无个人凭证、系统户凭证以共享只读形式可见 -> dave_creds=[('44372ee34c714b1abc737a53959100ba', 'tenant-a:__system__', False), ('e0041968fc95491fa41259217fe280d7', 'tenant-a:alice', False)]
+[PASS] 异租户引用系统户 credential_id 被拒（建会话 404 或对话无回复） -> 建会话即 404 拒绝：{"detail":"Credential '44372ee34c714b1abc737a53959100ba' not found."}
+----------------------------------------------------------------
+阶段 4：按租户动态注入 MCP/技能
+[PASS] tenant-a 建会话（触发注入） -> 201
+[PASS] A 会话工作区有专属 MCP tenant-a-tools（含 demo_time） -> mcps=['demo-tools', 'tenant-a-tools'] tools=['mcp__tenant-a-tools__demo_time']
+[PASS] A 会话有 default 技能 tenant-a-hello、无 optional 技能 -> skills=['tenant-a-hello']
+[PASS] tenant-b 建会话 -> 201
+[PASS] B 会话无 A 的专属 MCP 与技能 -> mcps=['demo-tools'] skills=[]
+----------------------------------------------------------------
+阶段 5：工作区产物回收（经服务 API）
+[PASS] 工作区文件经 API 回收到 data/artifacts 且内容一致 -> dir=/home/hatch/workspace/agent-base/data/artifacts/tenant-a/1f5ac05ba4c7421fb9d95a8e7f644ebf files=['.mcp', 'collect-probe.txt', 'skills/863b549230254233ae0998cba3b5323e/.index', 'skills/863b549230254233ae0998cba3b5323e/tenant-a-hello/SKILL.md', 'skills/863b549230254233ae0998cba3b5323e/tenant-a-hello/notes.txt', 'sub/nested.txt']
+----------------------------------------------------------------
+阶段 6：SOP 分发落库（系统户持有）
+[PASS] demo-dev 建会话（触发租户 SOP ensure） -> 201
+[PASS] 注册表 SOP demo-onboarding 已落库到系统户 -> system sops=['demo-onboarding']
+[PASS] 终端用户看不到系统户 SOP（无共享通道，缺口如实记录） -> user sops=[]
+----------------------------------------------------------------
+RESULT: ALL PASS

@@ -1,0 +1,69 @@
+create_app signature:
+(storage: agentscope.app.storage._base.StorageBase, message_bus: agentscope.app.message_bus._base.MessageBus, workspace_manager: agentscope.app.workspace_manager._base.WorkspaceManagerBase, knowledge_base_manager: agentscope.app.rag.knowledge_base_manager._base.KnowledgeBaseManagerBase | None = None, knowledge_parsers: list[agentscope.rag._parser._base.ParserBase] | dict[str, agentscope.rag._parser._base.ParserBase] | None = None, knowledge_chunkers: list[typing.Type[agentscope.rag._chunker._base.ChunkerBase]] | None = None, blob_store: agentscope.app.rag.blob_store._base.BlobStoreBase | None = None, enable_index_worker: bool = True, mcp_hubs: list[agentscope.app.hub._mcp._base.MCPHubBase] | None = None, skill_hubs: list[agentscope.app.hub._skill._base.SkillHubBase] | None = None, *, enable_channel_worker: bool = True, enable_scheduler: bool = True, extra_credentials: list[typing.Type[agentscope.credential._base.CredentialBase]] | None = None, extra_middlewares: list[typing.Any] | None = None, extra_agent_middlewares: collections.abc.Callable[[str, str, str], collections.abc.Awaitable[list[agentscope.middleware._base.MiddlewareBase]]] | collections.abc.Callable[[str, str, str, agentscope.workspace._base.WorkspaceBase], collections.abc.Awaitable[list[agentscope.middleware._base.MiddlewareBase]]] | None = None, extra_agent_tools: collections.abc.Callable[[str, str, str], collections.abc.Awaitable[list[agentscope.tool._base.ToolBase]]] | None = None, custom_subagent_templates: list[agentscope.app._types.SubAgentTemplate] | None = None, custom_agent_cls: Optional[Type[agentscope.agent._agent.Agent]] = None, resource_access_policy: agentscope.app.access._policy.ResourceAccessPolicyBase | None = None, channels: list[typing.Type[agentscope.app.channel._base.ChannelBase]] | None = None, download_secret: str | None = None, realtime_ice_servers: list[dict[str, typing.Any]] | None = None, title: str = 'AgentScope', version: str = '2.0.11', **kwargs: Any) -> Any
+agentscope.app exports: ['SubAgentTemplate', 'access', 'channel', 'create_app', 'deps', 'hub', 'message_bus', 'middleware', 'rag', 'storage', 'workspace_manager']
+storage exports: ['AgentChatConfig', 'AgentData', 'AgentRecord', 'AgentVerifier', 'ChannelBinding', 'ChannelOrigin', 'ChannelRecord', 'ChatModelConfig', 'ChunkerConfig', 'CredentialRecord', 'EmbeddingModelConfig', 'HumanVerifier', 'InviteConfig', 'KnowledgeBaseData', 'KnowledgeBaseRecord', 'KnowledgeDocumentData', 'KnowledgeDocumentRecord', 'KnowledgeDocumentStatus', 'MCPRecord', 'RealtimeModelConfig', 'RedisStorage', 'RoutingConfig', 'SOPAgentRef', 'SOPData', 'SOPOrigin', 'SOPRecord', 'SOPRunRecord', 'SOPStepDataV1', 'SOPVerifier', 'SOPWorkspaceGrain', 'ScheduleData', 'ScheduleOrigin', 'ScheduleRecord', 'ScheduleSource', 'SessionConfig', 'SessionKnowledgeConfig', 'SessionNaming', 'SessionOrigin', 'SessionRecord', 'SessionScope', 'SessionSettings', 'SessionSource', 'SkillRecord', 'StorageBase', 'TTSModelConfig', 'TYPE_CHECKING', 'TeamData', 'TeamMember', 'TeamOrigin', 'TeamRecord', 'UserOrigin', 'UserRecord']
+  class AgentChatConfig sig: (self, /, **data: 'Any') -> 'None'
+  class AgentData sig: (self, /, **data: 'Any') -> 'None'
+  class AgentRecord sig: (self, /, **data: 'Any') -> 'None'
+  class AgentVerifier sig: (self, /, **data: 'Any') -> 'None'
+  class ChannelBinding sig: (self, /, **data: 'Any') -> 'None'
+  class ChannelOrigin sig: (self, /, **data: 'Any') -> 'None'
+  class ChannelRecord sig: (self, /, **data: 'Any') -> 'None'
+  class ChatModelConfig sig: (self, /, **data: 'Any') -> 'None'
+  class ChunkerConfig sig: (self, /, **data: 'Any') -> 'None'
+  class CredentialRecord sig: (self, /, **data: 'Any') -> 'None'
+  class EmbeddingModelConfig sig: (self, /, **data: 'Any') -> 'None'
+  class HumanVerifier sig: (self, /, **data: 'Any') -> 'None'
+  class InviteConfig sig: (self, /, **data: 'Any') -> 'None'
+  class KnowledgeBaseData sig: (self, /, **data: 'Any') -> 'None'
+  class KnowledgeBaseRecord sig: (self, /, **data: 'Any') -> 'None'
+  class KnowledgeDocumentData sig: (self, /, **data: 'Any') -> 'None'
+  class KnowledgeDocumentRecord sig: (self, /, **data: 'Any') -> 'None'
+  class MCPRecord sig: (self, /, **data: 'Any') -> 'None'
+  class RealtimeModelConfig sig: (self, /, **data: 'Any') -> 'None'
+  class RedisStorage sig: (self, host: str = 'localhost', port: int = 6379, db: int = 0, password: str | None = None, connection_pool: typing.Any | None = None, key_ttl: int | None = None, key_config: 'RedisStorage.KeyConfig | None' = None, **kwargs: Any) -> None
+  class RoutingConfig sig: (self, /, **data: 'Any') -> 'None'
+  class SOPAgentRef sig: (self, /, **data: 'Any') -> 'None'
+  class SOPData sig: (self, /, **data: 'Any') -> 'None'
+  class SOPOrigin sig: (self, /, **data: 'Any') -> 'None'
+  class SOPRecord sig: (self, /, **data: 'Any') -> 'None'
+  class SOPRunRecord sig: (self, /, **data: 'Any') -> 'None'
+  class SOPStepDataV1 sig: (self, /, **data: 'Any') -> 'None'
+  class SOPWorkspaceGrain sig: (self, *args, **kwds)
+  class ScheduleData sig: (self, /, **data: 'Any') -> 'None'
+  class ScheduleOrigin sig: (self, /, **data: 'Any') -> 'None'
+  class ScheduleRecord sig: (self, /, **data: 'Any') -> 'None'
+  class ScheduleSource sig: (self, *args, **kwds)
+  class SessionConfig sig: (self, /, **data: 'Any') -> 'None'
+  class SessionKnowledgeConfig sig: (self, /, **data: 'Any') -> 'None'
+  class SessionNaming sig: (self, /, **data: 'Any') -> 'None'
+  class SessionRecord sig: (self, /, **data: 'Any') -> 'None'
+  class SessionScope sig: (self, *args, **kwds)
+  class SessionSettings sig: (self, /, **data: 'Any') -> 'None'
+  class SessionSource sig: (self, *args, **kwds)
+  class SkillRecord sig: (self, /, **data: 'Any') -> 'None'
+  class StorageBase sig: (self, /, *args, **kwargs)
+  class TTSModelConfig sig: (self, /, **data: 'Any') -> 'None'
+  class TeamData sig: (self, /, **data: 'Any') -> 'None'
+  class TeamMember sig: (self, /, **data: 'Any') -> 'None'
+  class TeamOrigin sig: (self, /, **data: 'Any') -> 'None'
+  class TeamRecord sig: (self, /, **data: 'Any') -> 'None'
+  class UserOrigin sig: (self, /, **data: 'Any') -> 'None'
+  class UserRecord sig: (self, /, **data: 'Any') -> 'None'
+message_bus exports: ['InMemoryMessageBus', 'MessageBus', 'MessageBusKeys', 'RedisMessageBus']
+  class InMemoryMessageBus sig: (self) -> 'None'
+  class MessageBus sig: (self, /, *args, **kwargs)
+  class MessageBusKeys sig: (self, /, *args, **kwargs)
+  class RedisMessageBus sig: (self, host: str = 'localhost', port: int = 6379, db: int = 0, password: str | None = None, connection_pool: typing.Any | None = None, **kwargs: Any) -> None
+workspace_manager exports: ['AppleContainerWorkspaceManager', 'BubblewrapWorkspaceManager', 'DaytonaWorkspaceManager', 'DockerWorkspaceManager', 'E2BWorkspaceManager', 'IsolationPolicy', 'K8sWorkspaceManager', 'LocalWorkspaceManager', 'OpenSandboxWorkspaceManager', 'PrewarmConfig', 'WorkspaceManagerBase']
+  class AppleContainerWorkspaceManager sig: (self, *, isolation: agentscope.app.workspace_manager._base.IsolationPolicy = <IsolationPolicy.PER_AGENT: 'per_agent'>, base_image: str = 'python:3.11-slim', cpus: int = 2, memory: str = '2G', gateway_port: int = 5600, env: dict[str, str] | None = None, extra_pip: list[str] | None = None, default_mcps: list[agentscope.mcp._mcp_client.MCPClient] | None = None, skill_paths: list[str] | None = None, ttl: float = 3600.0, sweep_interval: float = 300.0) -> None
+  class BubblewrapWorkspaceManager sig: (self, basedir: 'str', *, isolation: 'IsolationPolicy' = <IsolationPolicy.PER_AGENT: 'per_agent'>, gateway_port: 'int | None' = None, share_net: 'bool' = True, env: 'dict[str, str] | None' = None, extra_pip: 'list[str] | None' = None, default_mcps: 'list[MCPClient] | None' = None, skill_paths: 'list[str] | None' = None, ttl: 'float' = 3600.0, sweep_interval: 'float' = 300.0) -> 'None'
+  class DaytonaWorkspaceManager sig: (self, *, isolation: agentscope.app.workspace_manager._base.IsolationPolicy = <IsolationPolicy.PER_AGENT: 'per_agent'>, api_key: str = '', api_url: str = '', target: str = '', timeout_seconds: int = 300, gateway_port: int = 5600, env: dict[str, str] | None = None, sandbox_metadata: dict[str, str] | None = None, extra_pip: list[str] | None = None, default_mcps: list[agentscope.mcp._mcp_client.MCPClient] | None = None, skill_paths: list[str] | None = None, os_user: str | None = None, ttl: float = 3600.0, sweep_interval: float = 300.0) -> None
+  class DockerWorkspaceManager sig: (self, basedir: str, *, isolation: agentscope.app.workspace_manager._base.IsolationPolicy = <IsolationPolicy.PER_AGENT: 'per_agent'>, base_image: str = 'python:3.11-slim', node_version: str = '22.23.4', extra_pip: list[str] | None = None, gateway_port: int = 5600, env: dict[str, str] | None = None, default_mcps: list[agentscope.mcp._mcp_client.MCPClient] | None = None, skill_paths: list[str] | None = None, ttl: float = 3600.0, sweep_interval: float = 300.0, prewarm: agentscope.app.workspace_manager._prewarm.PrewarmConfig | None = None) -> None
+  class E2BWorkspaceManager sig: (self, *, isolation: agentscope.app.workspace_manager._base.IsolationPolicy = <IsolationPolicy.PER_AGENT: 'per_agent'>, template: str = 'base', api_key: str = '', domain: str = '', timeout_seconds: int = 300, gateway_port: int = 5600, env: dict[str, str] | None = None, sandbox_metadata: dict[str, str] | None = None, extra_pip: list[str] | None = None, default_mcps: list[agentscope.mcp._mcp_client.MCPClient] | None = None, skill_paths: list[str] | None = None, ttl: float = 3600.0, sweep_interval: float = 300.0, prewarm: agentscope.app.workspace_manager._prewarm.PrewarmConfig | None = None) -> None
+  class IsolationPolicy sig: (self, *args, **kwds)
+  class K8sWorkspaceManager sig: (self, *, isolation: agentscope.app.workspace_manager._base.IsolationPolicy = <IsolationPolicy.PER_AGENT: 'per_agent'>, namespace: str = 'agentscope', kubeconfig: str | None = None, image: str = 'python:3.11-slim', image_pull_policy: str = 'IfNotPresent', image_pull_secrets: list[str] | None = None, resources: dict[str, typing.Any] | None = None, node_selector: dict[str, str] | None = None, tolerations: list[dict[str, typing.Any]] | None = None, service_account: str | None = None, gateway_port: int = 5600, extra_pip: list[str] | None = None, storage_class: str | None = None, storage_size: str = '1Gi', env: dict[str, str] | None = None, default_mcps: list[agentscope.mcp._mcp_client.MCPClient] | None = None, skill_paths: list[str] | None = None, ttl: float = 3600.0, sweep_interval: float = 300.0, delete_pvc_on_close: bool = False) -> None
+  class LocalWorkspaceManager sig: (self, basedir: str, *, isolation: agentscope.app.workspace_manager._base.IsolationPolicy = <IsolationPolicy.PER_AGENT: 'per_agent'>, default_mcps: list | None = None, skill_paths: list[str] | None = None, ttl: float = 3600.0) -> None
+  class OpenSandboxWorkspaceManager sig: (self, *, isolation: agentscope.app.workspace_manager._base.IsolationPolicy = <IsolationPolicy.PER_AGENT: 'per_agent'>, image: str = 'python:3.11-slim', api_key: str = '', domain: str = '', protocol: Literal['http', 'https'] = 'http', request_timeout_seconds: float | None = 600.0, timeout_seconds: int = 300, gateway_port: int = 5600, env: dict[str, str] | None = None, sandbox_metadata: dict[str, str] | None = None, resource: dict[str, str] | None = None, entrypoint: list[str] | None = None, network_policy: typing.Any | None = None, extra_pip: list[str] | None = None, default_mcps: list[agentscope.mcp._mcp_client.MCPClient] | None = None, skill_paths: list[str] | None = None, ttl: float = 3600.0, sweep_interval: float = 300.0) -> None
+  class PrewarmConfig sig: (self, /, **data: 'Any') -> 'None'
+  class WorkspaceManagerBase sig: (self, *, isolation: agentscope.app.workspace_manager._base.IsolationPolicy = <IsolationPolicy.PER_AGENT: 'per_agent'>) -> None

@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+data/
+*.db
+smoke_output.txt
+
+*.egg-info/
+data/workspaces/
+logs/

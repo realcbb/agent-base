@@ -1,0 +1,24 @@
+# tenant-b 示例 Agent（动作清单冒烟用：反向验证——无专属 MCP/技能登记）。
+id: tenant-b.assistant
+version: 1
+tenant: tenant-b
+display_name: 租户B助手
+model:
+  primary: mock-local
+  temperature: 0.3
+  max_tokens: 2048
+system_prompt_file: prompts/echo-assistant.md
+tools:
+  mcp_servers: []
+  builtin: []
+permissions:
+  max_level: ASK
+limits:
+  max_iters: 6
+  max_seconds: 60
+  max_tokens: 8192
+memory:
+  long_term: false
+  scope: none
+context:
+  compaction: auto

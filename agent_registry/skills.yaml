@@ -1,0 +1,14 @@
+# 技能登记表（本体自托管在工程根 skills_store/<dir>/，含 SKILL.md）。
+# tenant：归属租户；scope：default 建会话时由网关 upload 注入会话工作区，
+# optional 只登记不自动注入。禁止走服务侧 from-library（用户库）通道。
+skills:
+  - name: tenant-a-hello
+    tenant: tenant-a
+    scope: default
+    dir: tenant-a-hello
+    description: tenant-a 默认技能（冒烟验证用自造技能）。
+  - name: tenant-a-optional
+    tenant: tenant-a
+    scope: optional
+    dir: tenant-a-optional
+    description: tenant-a 可选技能（验证 optional 不被自动注入）。

@@ -1,0 +1,20 @@
+================================================================
+agent-base model-strategy smoke test
+================================================================
+[PASS] gateway health
+[PASS] service health
+[PASS] POST /v1/sessions (vision-assistant) -> 201
+[PASS] 主模型按注册表组装 -> mock-1
+[PASS] fallback 原生下发 -> mock-backup-1
+[PASS] 纯文本轮次 completed -> 200 completed
+[PASS] 纯文本轮次未切换
+[PASS] 带图轮次 completed -> 200 completed {'run_id': 'run-0e704b3f88be', 'session_id': '0fb4767311e945a7a6616ed0f966e938', 'tenant': 'demo-dev', 'agent_id': 'demo
+[PASS] 事件含 model.switched -> mock-vision -> types=['run.started', 'message.delta', 'run.completed', 'run.started', 'model.switched', 'message.delta', 'run.completed']
+[PASS] 服务侧会话模型已切换
+[PASS] 切换后纯文本轮次 completed
+[PASS] 能力只升不降（仍 mock-vision-1）
+[PASS] POST /v1/sessions (echo-assistant) -> 201
+[PASS] 无 vision 模型收图 -> 400 MODEL_NO_VISION -> 400 MODEL_NO_VISION
+[PASS] 缺 X-End-User-Id -> 422 -> 422
+
+RESULT: ALL PASS

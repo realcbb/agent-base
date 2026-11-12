@@ -1,0 +1,29 @@
+# 示例 Agent（设计文档 6.1 声明式配置）。
+id: demo.echo-assistant
+version: 1
+tenant: demo-dev
+display_name: 演示回声助手
+model:
+  primary: mock-local
+  fallback: openai-compatible-default
+  temperature: 0.3
+  max_tokens: 2048
+system_prompt_file: prompts/echo-assistant.md
+tools:
+  mcp_servers:
+    - name: demo-tools
+      allow: [demo_time, demo_note_write]
+      deny: []
+  builtin: []
+permissions:
+  max_level: ASK
+limits:
+  max_iters: 6
+  max_seconds: 60
+  max_tokens: 8192
+memory:
+  long_term: false
+  scope: none
+context:
+  compaction: auto
+eval_set: demo-basic

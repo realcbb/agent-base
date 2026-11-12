@@ -1,0 +1,14 @@
+# SOP 登记表（组织级流程定义，单点登记、单点更新）。
+# 网关在租户首次供给时，以租户系统户 {tenant}:__system__ 身份把定义
+# 落库到服务侧（POST /sop/，同名则 PATCH 更新）。注意：框架资源访问
+# 策略的 ResourceKind 不含 SOP，终端用户对系统户 SOP 不可见、不能直接
+# 发起 run——当前只是分发落库，运行分发面见 NOTES 残留缺口。
+sops:
+  - name: demo-onboarding
+    tenant: demo-dev
+    description: 演示用最小 SOP：单步确认环境可用。
+    agent: demo.echo-assistant
+    session_key: main
+    steps:
+      - subject: 确认演示环境
+        description: 向用户打招呼并确认演示环境与工具链可用。

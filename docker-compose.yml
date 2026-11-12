@@ -1,0 +1,75 @@
+# 通用 AI 基座骨架 —— 生产形态编排（MySQL＋Redis＋双后端外置）
+# 用法：
+#   cp .env.example .env   # 填 PROJECT_KEYS、MYSQL_ROOT_PASSWORD 等
+#   docker compose up -d
+# 形态：网关可多副本（状态在 Redis，见 GATEWAY_STATE_BACKEND），
+# 基座服务可多副本（存储 MySQL＋总线 Redis）；本编排默认各 1 副本，
+# 网关扩容：docker compose up -d --scale gateway=2（需去掉 gateway
+# 的 ports 定端口映射或前置负载均衡）。裸机零依赖演示不走 compose，
+# 用 scripts/gen_demo_env.py 生成 demo .env 直接跑三进程（SQLite
+# ＋内存后端，仅本地开发）。
+services:
+  mcp:
+    build: .
+    command: ["python", "-m", "mcp_demo.server"]
+    environment:
+      MCP_PORT: "8200"
+      MCP_DEMO_NOTES_FILE: /app/data/notes.txt
+    volumes:
+      - agentbase-data:/app/data
+
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-agentbase-dev}
+      MYSQL_DATABASE: agentbase
+    volumes:
+      - agentbase-mysql:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+
+  service:
+    build: .
+    command: ["python", "-m", "service.run"]
+    environment:
+      SERVICE_PORT: "8100"
+      SERVICE_STORAGE: sql
+      SERVICE_DB_URL: ${SERVICE_DB_URL:-mysql+aiomysql://root:${MYSQL_ROOT_PASSWORD:-agentbase-dev}@mysql:3306/agentbase?charset=utf8mb4}
+      SERVICE_BUS: redis
+      SERVICE_REDIS_HOST: redis
+      SERVICE_REDIS_PORT: "6379"
+      SERVICE_WORKSPACE_DIR: /app/data/workspaces
+      MCP_URL: http://mcp:8200/mcp
+    volumes:
+      - agentbase-data:/app/data
+    depends_on:
+      - mcp
+      - mysql
+      - redis
+
+  gateway:
+    build: .
+    command: ["python", "-m", "gateway.run"]
+    environment:
+      GATEWAY_PORT: "8000"
+      PROJECT_KEYS: ${PROJECT_KEYS:?PROJECT_KEYS 未设置（见 .env.example）}
+      GATEWAY_RATE_LIMIT_PER_MIN: ${GATEWAY_RATE_LIMIT_PER_MIN:-120}
+      GATEWAY_STATE_BACKEND: redis
+      GATEWAY_REDIS_HOST: redis
+      GATEWAY_REDIS_PORT: "6379"
+      SERVICE_URL: http://service:8100
+      AGENT_BASE_USAGE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-agentbase-dev}@mysql:3306/agentbase?charset=utf8mb4
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - service
+      - mysql
+      - redis
+
+volumes:
+  agentbase-data:
+  agentbase-mysql:

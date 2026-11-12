@@ -1,0 +1,27 @@
+# tenant-a 示例 Agent（动作清单冒烟用：验证按租户动态注入）。
+id: tenant-a.assistant
+version: 1
+tenant: tenant-a
+display_name: 租户A助手
+model:
+  primary: mock-local
+  temperature: 0.3
+  max_tokens: 2048
+system_prompt_file: prompts/echo-assistant.md
+tools:
+  mcp_servers:
+    - name: tenant-a-tools
+      allow: [demo_time]
+      deny: []
+  builtin: []
+permissions:
+  max_level: ASK
+limits:
+  max_iters: 6
+  max_seconds: 60
+  max_tokens: 8192
+memory:
+  long_term: false
+  scope: none
+context:
+  compaction: auto

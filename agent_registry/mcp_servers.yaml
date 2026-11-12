@@ -1,0 +1,30 @@
+# MCP Server 登记表（设计文档 8.1 的文件化最小实现）。
+# 工具权限级按 8.2 三级申报：ALLOW 只读放行 / ASK 写入须确认 / DENY 禁登。
+# tenants：归属租户（分项目登记）；scope：default 建会话时由网关按租户
+# 全量注入会话工作区，optional 只登记不自动注入。
+# 注：demo-tools 同时是 service 装配的全局默认 MCP（default_mcps），
+# 网关注入时发现工作区已有同名会跳过，行为与改造前一致。
+mcp_servers:
+  - name: demo-tools
+    transport: streamable_http
+    url_env: MCP_URL
+    owner: agent-base demo
+    tenants: [demo-dev]
+    scope: default
+    tools:
+      - name: demo_time
+        level: ALLOW
+        description: 返回当前时间，只读无副作用。
+      - name: demo_note_write
+        level: ASK
+        description: 向笔记文件追加一条笔记，正式写入，执行前人工确认。
+  - name: tenant-a-tools
+    transport: streamable_http
+    url_env: MCP_URL
+    owner: tenant-a
+    tenants: [tenant-a]
+    scope: default
+    tools:
+      - name: demo_time
+        level: ALLOW
+        description: 返回当前时间，只读无副作用（tenant-a 专属登记的第二实例）。
