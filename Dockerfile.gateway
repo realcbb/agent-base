@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1.6
+# ---------------------------------------------------------------------------
+# agent-base 网关（对外契约 v1）镜像
+#
+# 构建（在 agent-base 源码根目录）:
+#   docker build -f Dockerfile.gateway -t agentbase-gateway:2.0.11 .
+#
+# 运行要点:
+#   - GATEWAY_HOST 在镜像内默认 0.0.0.0（旧合并镜像默认 127.0.0.1，
+#     容器互连时必须外部覆盖，本镜像已修掉这个坑）
+#   - 其余配置全走环境变量：SERVICE_URL / PROJECT_KEYS / MCP_URL /
+#     GATEWAY_STATE_BACKEND（多副本用 redis）等，见 gateway/adapter.py
+#   - agent_registry 与 skills_store 必须随镜像走：网关按注册表供给
+#     Agent、按租户注入 default MCP 与技能
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    GATEWAY_HOST=0.0.0.0 GATEWAY_PORT=8000
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY common ./common
+COPY service ./service
+COPY gateway ./gateway
+COPY mcp_demo ./mcp_demo
+COPY agent_registry ./agent_registry
+COPY skills_store ./skills_store
+
+RUN pip install . && mkdir -p /app/data /app/logs \
+    && useradd -r agentbase && chown -R agentbase /app
+USER agentbase
+
+EXPOSE 8000
+HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)" || exit 1
+
+CMD ["python", "-m", "gateway.run"]

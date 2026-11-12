@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1.6
+# ---------------------------------------------------------------------------
+# agent-base 基座服务（AgentScope service assembly）镜像
+#
+# 构建（在 agent-base 源码根目录）:
+#   docker build -f Dockerfile.service -t agentbase-service:2.0.11 .
+#
+# 运行要点:
+#   - SERVICE_HOST 在镜像内默认 0.0.0.0（旧合并镜像默认 127.0.0.1，
+#     容器互连时必须外部覆盖，本镜像已修掉这个坑）
+#   - 其余配置全走环境变量：SERVICE_DB_URL / SERVICE_REDIS_HOST /
+#     SERVICE_WORKSPACE=k8s / SERVICE_K8S_* / MCP_URL 等，见 service/app.py
+#   - K8s 工作区模式下进程需集群身份（in-cluster SA 或挂 kubeconfig），
+#     且 SA 须有工作区命名空间内管理 Pod/PVC 的 RBAC
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    SERVICE_HOST=0.0.0.0 SERVICE_PORT=8100
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY common ./common
+COPY service ./service
+COPY gateway ./gateway
+COPY mcp_demo ./mcp_demo
+COPY agent_registry ./agent_registry
+COPY skills_store ./skills_store
+
+RUN pip install . && mkdir -p /app/data /app/logs \
+    && useradd -r agentbase && chown -R agentbase /app
+USER agentbase
+
+EXPOSE 8100
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=4)" || exit 1
+
+CMD ["python", "-m", "service.run"]
