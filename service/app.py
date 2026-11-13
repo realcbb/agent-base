@@ -89,6 +89,45 @@ def _redis_mode() -> str:
     return "standalone"
 
 
+def _patch_k8s_namespace_ensure():
+    """共享命名空间部署适配（装配层补丁，框架本体不动）。
+
+    框架 K8sWorkspace.initialize 无条件先 read_namespace（404 才
+    create、403 直接抛错），它假设框架独占命名空间且拿得到集群
+    级 ClusterRole（get namespaces）。生产是业务共享命名空间：
+    命名空间由业务预置、本服务就运行在其中，存在性自明；而
+    ClusterRole 申请不了（2026-11-13 用户确认）。故把这一步换
+    成容忍 403 的版本：读得到照旧；403 视为「无权核实、按部
+    署约定当作存在」放行并记警告；其余错误（含 404）照旧抛，
+    真不存在时响亮失败；任何情况下都不 create_namespace。
+    """
+    import logging
+
+    from agentscope.workspace import K8sWorkspace
+
+    if getattr(K8sWorkspace._ensure_namespace, "_shared_ns", False):
+        return
+
+    async def _ensure_namespace_shared(self):
+        from kubernetes_asyncio.client.rest import ApiException
+
+        try:
+            await self._v1.read_namespace(self._namespace)
+        except ApiException as e:
+            if e.status == 403:
+                logging.getLogger(__name__).warning(
+                    "read_namespace 403（无集群级权限）：共享命名"
+                    "空间部署，命名空间 %s 由业务预置，跳过存在"
+                    "性检查",
+                    self._namespace,
+                )
+                return
+            raise
+
+    _ensure_namespace_shared._shared_ns = True  # type: ignore[attr-defined]
+    K8sWorkspace._ensure_namespace = _ensure_namespace_shared
+
+
 def _redis_sentinel_pool():
     """哨兵连接池：框架的总线/存储都接受外部 connection_pool 并
     原样使用，池由 redis.asyncio.sentinel 维护——取连接时按服务
@@ -221,6 +260,8 @@ def build_service_app():
         from agentscope.app.workspace_manager import (
             K8sWorkspaceManager,
         )
+
+        _patch_k8s_namespace_ensure()
 
         pull_secrets = [
             s.strip()
