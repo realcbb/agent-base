@@ -191,6 +191,12 @@ python smoke_models.py      # 多模型：逐 Agent 组装/fallback 下发/带�
 3. 改完先跑 `python agent_registry/validate_registry.py` 校验通过再重启；
 4. 注册表变更对**新建会话**即时生效，老会话不热换，属预期行为。
 
+注：网关支持 `AGENT_REGISTRY_DIR` 把注册表整体外置（K8s 下用
+ConfigMap 挂载到 `/config/registry`，见生产 YAML 的
+`agentbase-registry-configmap.yaml`）：外置后改 models/agent/
+MCP 登记只需更新 ConfigMap 并滚动重启网关，不必重出镜像；
+skills 实体（`skills_store/`）仍随镜像发布。
+
 ## 7. 生产清单（试部署转正式前逐项过）
 
 - [ ] `SERVICE_DB_URL` 已指 MySQL、`SERVICE_BUS=redis`（生产组合，

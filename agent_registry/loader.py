@@ -1,11 +1,23 @@
 # -*- coding: utf-8 -*-
 """Agent 注册表加载（YAML）。网关与校验脚本共用。"""
+import os
 from pathlib import Path
 
 import yaml
 
-REGISTRY_DIR = Path(__file__).resolve().parent
-SKILLS_STORE_DIR = REGISTRY_DIR.parent / "skills_store"
+_PACKAGE_DIR = Path(__file__).resolve().parent
+# 注册表目录可由 AGENT_REGISTRY_DIR 外置（如 K8s ConfigMap 挂载
+# 到 /config/registry）：注册表是数据（models/agents/mcp/skills/
+# sops ＋ prompts/），初期改动频繁，不必每次重出镜像。不设该
+# env 时行为与从前完全一致（用包内目录）。
+REGISTRY_DIR = (
+    Path(os.environ["AGENT_REGISTRY_DIR"])
+    if os.environ.get("AGENT_REGISTRY_DIR")
+    else _PACKAGE_DIR
+)
+# skills 实体内容仍在镜像内（skills_store），锚点钉死包目录、
+# 不随注册表外置漂移。
+SKILLS_STORE_DIR = _PACKAGE_DIR.parent / "skills_store"
 
 # 工具权限三级（2026-11-07 由 L0–L3 四级收敛，设计 8.2 修订口径）：
 #   ALLOW = 放行（只读工具经 MCP 注解 readOnlyHint 走框架快速通道）；
