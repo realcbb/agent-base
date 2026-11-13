@@ -262,6 +262,10 @@ class RedisState:
         self, session_id: str, after_event_id: str | None = None,
     ):
         client = self._async_client()
+        if self._mode == "cluster":
+            # 同总线侧的坑：集群客户端槽位缓存惰性初始化，首条命令
+            # 是 SUBSCRIBE 会 KeyError，先 ping 建好拓扑缓存。
+            await client.ping()
         pubsub = client.pubsub()
         # 先订阅再回放：回放期间新事件进 pubsub 缓冲，不丢；重叠部分
         # 靠 seen 集合去重。

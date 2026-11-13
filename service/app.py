@@ -132,6 +132,11 @@ class ClusterRedisMessageBus(RedisMessageBus):
             password=self._cluster_password,
             decode_responses=True,
         )
+        # redis-py 集群客户端的槽位缓存是惰性初始化的：首条命令若
+        # 是 SUBSCRIBE（框架总线启动即订阅），get_node_from_slot
+        # 会因缓存未建而 KeyError（2026-11-13 wstest 实测复现）。
+        # 先 ping 一次把拓扑缓存建好，再交回框架使用。
+        await self._client.ping()
         return self
 
     async def aclose(self) -> None:
