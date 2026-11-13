@@ -137,7 +137,17 @@ def _redis_sentinel_pool():
     from redis.asyncio.sentinel import Sentinel
 
     addrs = _parse_redis_addrs(env("SERVICE_REDIS_SENTINELS", ""), 26379)
-    master = Sentinel(addrs, socket_connect_timeout=5).master_for(
+    # protocol 必须同时钉在 Sentinel 本体与 sentinel_kwargs 上：
+    # redis-py 建哨兵节点自身的连接时只取 socket_* 参数，
+    # master_for 上的 protocol 管不到它——哨兵连接默认 RESP3
+    # 发 HELLO，平台哨兵不认即整链失败（2026-11-13 生产实测：
+    # 16:20 的 traceback 就死在 discover_master 这一步）。
+    master = Sentinel(
+        addrs,
+        socket_connect_timeout=5,
+        protocol=2,
+        sentinel_kwargs={"protocol": 2, "socket_connect_timeout": 5},
+    ).master_for(
         env("SERVICE_REDIS_SENTINEL_MASTER", "mymaster"),
         db=0,
         password=env("SERVICE_REDIS_PASSWORD") or None,

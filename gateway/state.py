@@ -171,7 +171,8 @@ class RedisState:
             import redis.sentinel
 
             self._r = redis.sentinel.Sentinel(
-                sentinels, socket_connect_timeout=5,
+                sentinels, socket_connect_timeout=5, protocol=2,
+                sentinel_kwargs={"protocol": 2, "socket_connect_timeout": 5},
             ).master_for(
                 master_name,
                 decode_responses=True,
@@ -221,7 +222,8 @@ class RedisState:
             import redis.asyncio.sentinel
 
             return redis.asyncio.sentinel.Sentinel(
-                self._sentinels, socket_connect_timeout=5,
+                self._sentinels, socket_connect_timeout=5, protocol=2,
+                sentinel_kwargs={"protocol": 2, "socket_connect_timeout": 5},
             ).master_for(
                 self._master_name,
                 decode_responses=True,
