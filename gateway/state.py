@@ -249,6 +249,14 @@ class RedisState:
         pipe = self._r.pipeline()
         pipe.rpush(f"gw:events:{{{sid}}}", raw)
         pipe.ltrim(f"gw:events:{{{sid}}}", -_EVENTS_CAP, -1)
+        if self._mode == "cluster":
+            # redis-py 在集群模式下禁止 pipeline 内 publish（实测
+            # RedisClusterException）。发布改走单独调用：follow 端
+            # 先回放列表再订阅、靠 seen 去重，发布与写入的先后不
+            # 影响正确性。
+            pipe.execute()
+            self._r.publish(f"gw:live:{{{sid}}}", raw)
+            return
         pipe.publish(f"gw:live:{{{sid}}}", raw)
         pipe.execute()
 
