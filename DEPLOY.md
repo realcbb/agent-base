@@ -89,6 +89,8 @@ chmod 600 .env                   # .env 永不入代码库、永不入包
 
 动态技能发布（2026-11-13）：业务专家经 `POST /v1/admin/skills`（multipart：zip 包＋`visibility=tenant|global`＋`injection=default|optional`）发布技能，对新建会话立即生效，免镜像、免重启；配套端点有列表、版本列表、`activate`（拨版本指针＝激活/回滚）、`disable`。技能名取包内 SKILL.md frontmatter 的 `name`，是唯一身份。语义三条：①版本不可变，每次发布是新版本，会话创建时按当时当前版本把文件快照装进工作区、之后不再变（版本钉住）；②可见性＝global＋本租户，同名覆盖序为 global 静态 < global 动态 < 本租户静态 < 本租户动态；③静态层（镜像内 skills_store＋skills.yaml）保留，与动态层合并读取。注入逐项记账，失败项会以 `[adapter] 注入失败 …` 打进网关日志（注入报告本身不进契约响应）。
 
+活会话按需装技能（2026-11-14）：`POST /v1/sessions/{id}/skills`（body：`name`，可选 `version`）把技能装进**已存在**会话的工作区，走服务侧原生 upload 通道。default/optional 均可装——optional 的定位就是建会话不装、用时再装，技能数涨到几百个时靠这条分档避免每会话全量灌入。动态技能缺省装当前版本、`version` 可指定历史版本（不存在回 404 `SKILL_VERSION_NOT_FOUND`）；静态技能无版本、传 `version` 回 400。重复装同名：先经服务侧 DELETE 按 SKILL.md 的 name 摘除旧副本再装入（框架 add_skill_archive 对重名目录只会加数字后缀、留双份，故由网关先摘）。技能对会话租户不可见回 404 `SKILL_NOT_FOUND`（不泄露他租户技能存在性）。
+
 ## 4. 启动
 
 裸机按顺序拉起（mcp_demo 可跳过）：

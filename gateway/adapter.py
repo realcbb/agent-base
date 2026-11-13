@@ -733,6 +733,81 @@ class AgentScopeAdapter:
             return f"injected:v{skill.get('version')}"
         return "injected"
 
+    async def install_skill(
+        self,
+        session: AdapterSession,
+        name: str,
+        version: int | None = None,
+    ) -> tuple[str, str | int | None]:
+        """把一个技能按需装进活会话的工作区（建会话注入之外的补装）。
+
+        服务侧 POST /workspace/skill/upload 本就对任意存续工作区
+        可用，这里只补网关契约面：可见性按会话租户解析（静态＋
+        动态合并、default/optional 不限——optional 的意义就是
+        建会话不装、用时再装）；动态技能可指定版本号（缺省取
+        当前版本，指定版本不存在回 SKILL_VERSION_NOT_FOUND）；
+        静态技能没有版本概念，传 version 回 400。
+        重复装同名技能时先经服务侧 DELETE 按 SKILL.md 的 name
+        摘除旧副本，再装入——框架 add_skill_archive 本身只会给
+        重名目录加数字后缀、留两个副本并存。
+        返回 (结果串, 实际装入版本|None)：结果串与注入记账同
+        口径（injected / injected:vN / http_XXX / error:类型名），
+        本方法不抛错，由端点按结果串映射状态码。
+        """
+        from gateway.registry import skills_for_tenant
+        from gateway.skill_store import get_skill_store
+
+        skill = next(
+            (
+                s
+                for s in skills_for_tenant(session.tenant, scope=None)
+                if s["name"] == name
+            ),
+            None,
+        )
+        if skill is None:
+            return "error:SkillNotFound", None
+        if skill.get("dynamic"):
+            if version is not None:
+                store = get_skill_store()
+                row = store.get_skill(skill["tenant"], name) or {}
+                known = {
+                    v["version"] for v in store.list_versions(
+                        skill["tenant"], name,
+                    ) or []
+                }
+                if not row or version not in known:
+                    return "error:SkillVersionNotFound", None
+                skill = {**skill, "version": version}
+            installed_version: int | None = int(skill["version"])
+        else:
+            if version is not None:
+                return "error:StaticSkillVersioned", None
+            installed_version = None
+
+        headers = self._headers(session.tenant, session.end_user)
+        params = {
+            "agent_id": session.service_agent_id,
+            "session_id": session.session_id,
+        }
+        # 先摘同名旧副本（服务端幂等：没有也回 204），再装入。
+        try:
+            await self.client.delete(
+                f"/workspace/skill/{name}", headers=headers, params=params,
+            )
+        except httpx.HTTPError:
+            pass
+        result = await self._upload_skill(session, skill, headers, params)
+        if session.injection_report is not None:
+            session.injection_report.setdefault("skills", {})[name] = result
+        if result.startswith(("error:", "http_")):
+            print(
+                f"[adapter] 注入失败 skills/{name}: {result} "
+                f"(tenant={session.tenant} "
+                f"session={session.session_id})",
+            )
+        return result, installed_version
+
     # ------------------------------------------------- 工作区产物回收
     async def collect_artifacts(self, session: AdapterSession) -> dict:
         """把会话工作区文件回收到 data/artifacts/{tenant}/{session}/。

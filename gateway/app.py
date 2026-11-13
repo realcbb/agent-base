@@ -57,6 +57,14 @@ class SessionCreate(BaseModel):
     agent_id: str
 
 
+class SkillInstall(BaseModel):
+    """活会话按需装技能：name 为技能名；version 仅动态技能可用
+    （缺省装当前版本，指定则装该历史版本），静态技能传了回 400。"""
+
+    name: str
+    version: int | None = None
+
+
 IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 MAX_IMAGES_PER_MESSAGE = 8
 MAX_IMAGE_B64_LEN = 14_000_000  # ≈10MB 二进制，防超大图打爆上下文与存储
@@ -358,6 +366,53 @@ async def post_confirmation(
     if mode == "async":
         return JSONResponse(status_code=202, content=run)
     return run
+
+
+@app.post("/v1/sessions/{session_id}/skills", status_code=201)
+async def install_session_skill(
+    request: Request,
+    session_id: str,
+    body: SkillInstall,
+    x_end_user_id: str = Header(...),
+):
+    """把技能按需装进活会话的工作区（default/optional 均可装）。
+
+    动态技能缺省装当前版本，version 指定则装该历史版本；
+    重复装同名先摘旧副本再装入（adapter.install_skill）。
+    """
+    session, err = await _get_owned_session(request, session_id, x_end_user_id)
+    if err:
+        return err
+    result, installed_version = await adapter.install_skill(
+        session, body.name, body.version,
+    )
+    if result == "error:SkillNotFound":
+        return _err(
+            404, "SKILL_NOT_FOUND", "skill not found for tenant",
+            request.state.trace_id,
+        )
+    if result == "error:SkillVersionNotFound":
+        return _err(
+            404, "SKILL_VERSION_NOT_FOUND", "skill version not found",
+            request.state.trace_id,
+        )
+    if result == "error:StaticSkillVersioned":
+        return _err(
+            400, "SKILL_INVALID",
+            "static skills have no versions; omit version",
+            request.state.trace_id,
+        )
+    if result.startswith(("error:", "http_")):
+        return _err(
+            502, "INTERNAL", f"skill install failed: {result}",
+            request.state.trace_id,
+        )
+    return {
+        "session_id": session_id,
+        "name": body.name,
+        "version": installed_version,
+        "result": result,
+    }
 
 
 @app.delete("/v1/sessions/{session_id}")
