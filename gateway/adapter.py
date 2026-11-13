@@ -681,6 +681,17 @@ class AgentScopeAdapter:
             except Exception as exc:  # noqa: BLE001 - 逐项记账不抛错
                 report["skills"][name] = f"error:{type(exc).__name__}"
         session.injection_report = report
+        # 注入失败必须在日志里可见：报告只在内存簿记里、不进契约
+        # 响应，静默失败会让"技能没装上"无从排查（2026-11-13 实测
+        # 教训：上传超时在 wstest 存在已久，因无日志一直没被发现）。
+        for kind in ("mcp", "skills"):
+            for item, result in report[kind].items():
+                if result.startswith(("error:", "http_")):
+                    print(
+                        f"[adapter] 注入失败 {kind}/{item}: {result} "
+                        f"(tenant={session.tenant} "
+                        f"session={session.session_id})",
+                    )
 
     async def _upload_skill(
         self,
@@ -709,6 +720,12 @@ class AgentScopeAdapter:
             params=params,
             data={"manifest": json.dumps({"entries": entries})},
             files=parts,
+            # 专用长超时：服务侧安装要把 tar 经 Pod exec 流式送进
+            # 工作区、多次往返，与普通 JSON 调用共用客户端 30s 预算
+            # 必爆（2026-11-13 wstest 实测）。env 可调。
+            timeout=httpx.Timeout(
+                float(env("GATEWAY_SKILL_UPLOAD_TIMEOUT_SECS", "600")),
+            ),
         )
         if r.status_code != 201:
             return f"http_{r.status_code}"

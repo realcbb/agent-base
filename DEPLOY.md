@@ -82,6 +82,12 @@ chmod 600 .env                   # .env 永不入代码库、永不入包
 | 协议钉版（代码内） | 服务与网关的全部 Redis 客户端构造均钉 `protocol=2`（RESP2）：redis-py 8 默认 RESP3、每次建连先发 `HELLO 3`，平台 Redis（6.0 以前或兼容引擎）不认 HELLO 会整连失败（2026-11-13 生产实测）。**哨兵模式有个坑**：redis-py 给哨兵节点自身建连接时只继承 `socket_*` 参数，钉在 master_for 上的 protocol 管不到它——哨兵连接照旧发 HELLO、死在 discover_master（同日二轮实测）；三处 Sentinel 构造已另行补 `sentinel_kwargs={"protocol": 2, ...}`。本栈命令面（Streams/Lua/Pub/Sub/Hash）纯 RESP2 语义，钉版无功能损失；换用原生高版本 Redis 也照常工作。注：wstest 的哨兵是真 Redis 7、认 HELLO，此坑只能靠假哨兵线级测试抓 |
 | `AGENT_BASE_USAGE_URL` | 计量库连接（生产：`mysql+pymysql://…`，与服务存储同 MySQL 实例即可）；未给时从 `SERVICE_DB_URL` 推导同库；`AGENT_BASE_USAGE_DB` 文件路径仅本地开发 |
 | `MCP_URL` | 网关侧变量：网关按注册表 `url_env` 解析的 MCP 地址（如 demo-tools）。service 不再读此变量；留空时引用它的注册表 MCP 注入失败（注入记账报错，会话本身照常建成） |
+| `AGENT_BASE_SKILLS_URL` | 动态技能仓储连接（生产：`mysql+pymysql://…`，可与服务存储同库，表 `gw_skills`/`gw_skill_versions` 首次使用时自动建）；未给时从 `SERVICE_DB_URL` 推导。仓储不可用时动态技能层整体跳过（静态技能不受影响），发布端点回 503 |
+| `GATEWAY_PLATFORM_TENANT` | 平台租户名：只有它能发布/管理 global（全租户通用）技能；未配则 global 发布关闭，本租户技能的发布不受影响 |
+| `SKILL_BLOB_BACKEND` | 技能包本体后端：`db`（默认，整包 zip 存 LONGBLOB，零新增基础设施）｜`s3`（内网 S3 兼容 OSS 只存工件、索引仍在库；须配 `SKILL_OSS_BUCKET`，可选 `SKILL_OSS_ENDPOINT_URL`/`SKILL_OSS_REGION`/`SKILL_OSS_ACCESS_KEY`/`SKILL_OSS_SECRET_KEY`） |
+| `GATEWAY_SKILL_UPLOAD_TIMEOUT_SECS` | 技能上传进工作区的专用超时，默认 600 秒。服务侧安装要把 tar 经 Pod exec 流式送进工作区、多次往返，不得与普通调用共用网关客户端的 30s 预算（2026-11-13 wstest 实测 30s 必爆） |
+
+动态技能发布（2026-11-13）：业务专家经 `POST /v1/admin/skills`（multipart：zip 包＋`visibility=tenant|global`＋`injection=default|optional`）发布技能，对新建会话立即生效，免镜像、免重启；配套端点有列表、版本列表、`activate`（拨版本指针＝激活/回滚）、`disable`。技能名取包内 SKILL.md frontmatter 的 `name`，是唯一身份。语义三条：①版本不可变，每次发布是新版本，会话创建时按当时当前版本把文件快照装进工作区、之后不再变（版本钉住）；②可见性＝global＋本租户，同名覆盖序为 global 静态 < global 动态 < 本租户静态 < 本租户动态；③静态层（镜像内 skills_store＋skills.yaml）保留，与动态层合并读取。注入逐项记账，失败项会以 `[adapter] 注入失败 …` 打进网关日志（注入报告本身不进契约响应）。
 
 ## 4. 启动
 
