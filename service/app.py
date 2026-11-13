@@ -220,6 +220,15 @@ def build_service_app():
             for s in env("SERVICE_K8S_IMAGE_PULL_SECRETS", "").split(",")
             if s.strip()
         ]
+
+        def _json_env(name: str):
+            raw = env(name, "")
+            if not raw:
+                return None
+            import json
+
+            return json.loads(raw)
+
         workspace_manager = K8sWorkspaceManager(
             isolation=IsolationPolicy.PER_SESSION,
             namespace=env("SERVICE_K8S_NAMESPACE", "agentscope"),
@@ -227,6 +236,17 @@ def build_service_app():
             image_pull_secrets=pull_secrets or None,
             storage_class=env("SERVICE_K8S_STORAGE_CLASS") or None,
             storage_size=env("SERVICE_K8S_STORAGE_SIZE", "1Gi"),
+            # 工作区 Pod 的身份与资源（共享命名空间部署时是刚需）：
+            # service_account 指定专用零权限账号——工作区是不可信
+            # 执行面，绝不能继承命名空间 default 账号（共享集群里
+            # 它常带业务权限）；resources 给 Pod 定 requests/
+            # limits，避免 BestEffort 挤占同命名空间的业务容器；
+            # node_selector/tolerations 用于把工作区钉到专用节点
+            # 池。三者均为 JSON env，格式见 .env.example。
+            service_account=env("SERVICE_K8S_SERVICE_ACCOUNT") or None,
+            resources=_json_env("SERVICE_K8S_RESOURCES"),
+            node_selector=_json_env("SERVICE_K8S_NODE_SELECTOR"),
+            tolerations=_json_env("SERVICE_K8S_TOLERATIONS"),
         )
     else:
         workspace_dir = resolve_path(

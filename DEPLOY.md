@@ -116,7 +116,15 @@ command 区分；配置经 ConfigMap/Secret 注入同一套 .env 变量）：
   确定性派生，任一服务副本可按名找回；空闲 1 小时 Pod 被回收、
   PVC 默认保留（文件不丢）。工作区镜像默认 `python:3.11-slim`，
   内网须预先同步到内部镜像仓并改 `SERVICE_K8S_IMAGE`（＋拉取密钥
-  `SERVICE_K8S_IMAGE_PULL_SECRETS`）；
+  `SERVICE_K8S_IMAGE_PULL_SECRETS`）；工作区 Pod 身份/资源/节点池
+  经 `SERVICE_K8S_SERVICE_ACCOUNT`、`SERVICE_K8S_RESOURCES`（JSON）、
+  `SERVICE_K8S_NODE_SELECTOR`/`SERVICE_K8S_TOLERATIONS`（JSON）透传
+  管理器。**共享命名空间部署**（与业务容器同命名空间、无法新建
+  命名空间时）：SERVICE_K8S_NAMESPACE 填业务命名空间名；
+  SERVICE_ACCOUNT 必配专用零权限账号（default 账号不得继承）；
+  命名空间级 ResourceQuota/LimitRange/default SA 设置一律不要
+  随本系统 apply（会波及业务容器），工作区出入站策略靠 Pod
+  自带标签 `agentscope.workspace=true` 精确收口；
 - **RBAC**：基座服务的 ServiceAccount 须在工作区命名空间有
   pods（含 pods/exec）、persistentvolumeclaims 的 get/list/watch/
   create/delete/patch/update 权限，**外加一条集群级权限**：
