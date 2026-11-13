@@ -24,6 +24,8 @@ dependencies = [
     "redis==8.1.0",
     # K8s 工作区后端（SERVICE_WORKSPACE=k8s）用，框架懒加载
     "kubernetes-asyncio==36.1.0",
+    # 动态技能仓储 s3 后端（SKILL_BLOB_BACKEND=s3）用，懒加载
+    "boto3==1.40.61",
 ]
 
 [tool.setuptools]

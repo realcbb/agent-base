@@ -10,7 +10,7 @@ import hashlib
 import hmac
 import time
 
-from fastapi import FastAPI, Header, Request
+from fastapi import FastAPI, File, Form, Header, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, model_validator
 
@@ -21,6 +21,12 @@ from gateway.adapter import (
     AgentScopeAdapter,
     ModelCapabilityError,
     SessionBusyError,
+)
+from gateway.skill_store import (
+    GLOBAL_TENANT as SKILL_GLOBAL_TENANT,
+    SkillPackageError,
+    get_skill_store,
+    validate_and_normalize_package,
 )
 
 load_env()
@@ -39,6 +45,10 @@ USER_RATE_LIMIT = int(env("GATEWAY_RATE_LIMIT_PER_USER_PER_MIN", "0"))
 REQUIRE_USER_PROOF = env("GATEWAY_REQUIRE_USER_PROOF", "0") == "1"
 
 adapter = AgentScopeAdapter()
+skill_store = get_skill_store()
+# 平台租户：只有它能发布/管理 global（全租户通用）技能；未配则
+# global 发布关闭。本租户技能的发布不受此限。
+PLATFORM_TENANT = env("GATEWAY_PLATFORM_TENANT")
 
 app = FastAPI(title="agent-base gateway", version="1.0")
 
@@ -409,3 +419,163 @@ async def get_audit(request: Request, limit: int = 100):
             _tenant(request), limit=max(1, min(limit, 500)),
         ),
     }
+
+
+# ---------------------------------------------------------- 动态技能管理
+# 业务专家把技能包发布进仓储（gateway.skill_store），对新建会话
+# 立即生效，免镜像、免重启。鉴权与租户来自既有中间件；global
+# （全租户通用）技能的发布与管理只许平台租户
+# （GATEWAY_PLATFORM_TENANT）。技能名取包内 SKILL.md frontmatter
+# 的 name，是唯一身份来源。
+
+
+def _skill_view(row: dict) -> dict:
+    return {
+        "name": row["name"],
+        "tenant": row["tenant"],
+        "visibility": (
+            "global" if row["tenant"] == SKILL_GLOBAL_TENANT else "tenant"
+        ),
+        "injection": row["injection"],
+        "status": row["status"],
+        "current_version": row["current_version"],
+        "publisher": row["publisher"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _owned_skill(request: Request, name: str) -> dict | None:
+    """管理口径的归属解析：先本租户，平台租户再查 global。"""
+    tenant = _tenant(request)
+    row = skill_store.get_skill(tenant, name)
+    if row is not None:
+        return row
+    if PLATFORM_TENANT and tenant == PLATFORM_TENANT:
+        return skill_store.get_skill(SKILL_GLOBAL_TENANT, name)
+    return None
+
+
+def _store_ready(request: Request):
+    if skill_store.healthy:
+        return None
+    return _err(
+        503, "SKILL_STORE_UNAVAILABLE", "技能仓储不可用",
+        request.state.trace_id,
+    )
+
+
+@app.post("/v1/admin/skills", status_code=201)
+async def publish_skill(
+    request: Request,
+    file: UploadFile = File(...),
+    visibility: str = Form("tenant"),
+    injection: str = Form("default"),
+    note: str = Form(""),
+    activate: bool = Form(True),
+):
+    """发布一个技能版本（zip 包）。activate=True 时立即成为当前
+    版本，对此后新建的会话生效；已有会话不受影响。"""
+    if (err := _store_ready(request)) is not None:
+        return err
+    trace_id = request.state.trace_id
+    tenant = _tenant(request)
+    if visibility not in ("tenant", "global"):
+        return _err(
+            422, "SKILL_INVALID", "visibility 须为 tenant 或 global",
+            trace_id,
+        )
+    if injection not in ("default", "optional"):
+        return _err(
+            422, "SKILL_INVALID", "injection 须为 default 或 optional",
+            trace_id,
+        )
+    owner = tenant
+    if visibility == "global":
+        if not PLATFORM_TENANT or tenant != PLATFORM_TENANT:
+            return _err(
+                403, "SKILL_GLOBAL_FORBIDDEN",
+                "只有平台租户能发布全租户通用技能", trace_id,
+            )
+        owner = SKILL_GLOBAL_TENANT
+    try:
+        pkg = validate_and_normalize_package(await file.read())
+    except SkillPackageError as exc:
+        return _err(422, "SKILL_PACKAGE_INVALID", str(exc), trace_id)
+    result = skill_store.publish(
+        tenant=owner,
+        name=pkg["name"],
+        injection=injection,
+        zip_bytes=pkg["zip_bytes"],
+        manifest=pkg["manifest"],
+        publisher=tenant,
+        note=note,
+        activate=activate,
+    )
+    result["visibility"] = visibility
+    result["description"] = pkg["description"]
+    return result
+
+
+@app.get("/v1/admin/skills")
+async def list_admin_skills(request: Request):
+    """本租户的动态技能＋全部 global 技能（含状态与当前版本）。"""
+    if (err := _store_ready(request)) is not None:
+        return err
+    rows = skill_store.list_skills([_tenant(request), SKILL_GLOBAL_TENANT])
+    return {"skills": [_skill_view(r) for r in rows]}
+
+
+@app.get("/v1/admin/skills/{name}/versions")
+async def list_skill_versions(request: Request, name: str):
+    if (err := _store_ready(request)) is not None:
+        return err
+    row = _owned_skill(request, name)
+    if row is None:
+        return _err(
+            404, "SKILL_NOT_FOUND", "skill not found",
+            request.state.trace_id,
+        )
+    return {
+        "name": name,
+        "tenant": row["tenant"],
+        "versions": skill_store.list_versions(row["tenant"], name),
+    }
+
+
+class SkillActivate(BaseModel):
+    version: int
+
+
+@app.post("/v1/admin/skills/{name}/activate")
+async def activate_skill(request: Request, name: str, body: SkillActivate):
+    """把当前版本拨到指定版本（激活/回滚），并置为 published。"""
+    if (err := _store_ready(request)) is not None:
+        return err
+    row = _owned_skill(request, name)
+    if row is None:
+        return _err(
+            404, "SKILL_NOT_FOUND", "skill not found",
+            request.state.trace_id,
+        )
+    if not skill_store.set_current(row["tenant"], name, body.version):
+        return _err(
+            404, "SKILL_VERSION_NOT_FOUND", "version not found",
+            request.state.trace_id,
+        )
+    return _skill_view(skill_store.get_skill(row["tenant"], name))
+
+
+@app.post("/v1/admin/skills/{name}/disable")
+async def disable_skill(request: Request, name: str):
+    """停用技能：注册表合并时跳过，新建会话不再注入。"""
+    if (err := _store_ready(request)) is not None:
+        return err
+    row = _owned_skill(request, name)
+    if row is None:
+        return _err(
+            404, "SKILL_NOT_FOUND", "skill not found",
+            request.state.trace_id,
+        )
+    skill_store.set_status(row["tenant"], name, "disabled")
+    return _skill_view(skill_store.get_skill(row["tenant"], name))

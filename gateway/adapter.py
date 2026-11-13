@@ -77,7 +77,7 @@ from agent_registry.loader import REGISTRY_DIR, load_agent, load_agents, load_mo
 from common.config import env, resolve_path
 from gateway.registry import (
     mcp_servers_for_tenant,
-    skill_files,
+    skill_package_files,
     skills_for_tenant,
     sops_for_tenant,
 )
@@ -689,20 +689,18 @@ class AgentScopeAdapter:
         headers: dict,
         params: dict,
     ) -> str:
-        """把 skills_store 里的技能文件夹经 upload 通道装进会话工作区。
+        """把技能本体经 upload 通道装进会话工作区。
 
-        manifest 的 path 是相对所选文件夹的父目录（即
-        "<dir>/<相对路径>"），files 按 manifest 顺序逐个发送——与
-        服务侧 UploadManifest 的约定一致（探针见 _router/_workspace）。
+        本体来源两层（gateway.registry 合并）：静态层读 skills_store
+        目录，动态层从技能仓储按合并时钉住的版本号取包。manifest
+        的 path 是相对所选文件夹的父目录（即 "<dir>/<相对路径>"），
+        files 按 manifest 顺序逐个发送——与服务侧 UploadManifest
+        的约定一致（探针见 _router/_workspace）。
         """
-        skill_path: Path = skill["skill_path"]
-        root_name = skill_path.name
-        files = skill_files(skill_path)
+        root_name = str(skill.get("dir") or skill["name"])
         entries = []
         parts = []
-        for f in files:
-            rel = f.relative_to(skill_path).as_posix()
-            data = f.read_bytes()
+        for rel, data in skill_package_files(skill):
             entries.append({"path": f"{root_name}/{rel}", "size": len(data)})
             parts.append(("files", (rel, data)))
         r = await self.client.post(
@@ -712,7 +710,11 @@ class AgentScopeAdapter:
             data={"manifest": json.dumps({"entries": entries})},
             files=parts,
         )
-        return "injected" if r.status_code == 201 else f"http_{r.status_code}"
+        if r.status_code != 201:
+            return f"http_{r.status_code}"
+        if skill.get("dynamic"):
+            return f"injected:v{skill.get('version')}"
+        return "injected"
 
     # ------------------------------------------------- 工作区产物回收
     async def collect_artifacts(self, session: AdapterSession) -> dict:
