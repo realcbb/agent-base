@@ -175,6 +175,7 @@ class RedisState:
             ).master_for(
                 master_name,
                 decode_responses=True,
+                protocol=2,  # 钉 RESP2：redis-py 8 默认 RESP3 建连发 HELLO，平台 Redis 不认（2026-11-13 生产实测）
                 password=password,
                 socket_connect_timeout=5,
             )
@@ -186,6 +187,7 @@ class RedisState:
         else:
             self._r = redis.Redis(
                 host=host, port=port, decode_responses=True,
+                protocol=2,
                 password=password,
                 socket_connect_timeout=5,
             )
@@ -201,6 +203,7 @@ class RedisState:
                     for h, p in self._cluster_nodes or []
                 ],
                 decode_responses=True,
+                protocol=2,
                 password=self._password,
                 socket_connect_timeout=5,
             )
@@ -222,6 +225,7 @@ class RedisState:
             ).master_for(
                 self._master_name,
                 decode_responses=True,
+                protocol=2,  # 钉 RESP2：redis-py 8 默认 RESP3 建连发 HELLO，平台 Redis 不认（2026-11-13 生产实测）
                 password=self._password,
                 socket_connect_timeout=5,
             )
@@ -234,11 +238,13 @@ class RedisState:
                     for h, p in self._cluster_nodes or []
                 ],
                 decode_responses=True,
+                protocol=2,
                 password=self._password,
                 socket_connect_timeout=5,
             )
         return aioredis.Redis(
             host=self._host, port=self._port, decode_responses=True,
+                protocol=2,
             password=self._password,
         )
 

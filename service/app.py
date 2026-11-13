@@ -103,6 +103,10 @@ def _redis_sentinel_pool():
         db=0,
         password=env("SERVICE_REDIS_PASSWORD") or None,
         decode_responses=True,
+        # 钉 RESP2：redis-py 8 默认 RESP3、建连即发 HELLO 3，
+        # 平台 Redis（<6.0 或兼容引擎）不认 HELLO 会整连失败
+        #（2026-11-13 生产实测）。本栈命令面纯 RESP2 语义。
+        protocol=2,
     )
     return master.connection_pool
 
@@ -131,6 +135,7 @@ class ClusterRedisMessageBus(RedisMessageBus):
             ],
             password=self._cluster_password,
             decode_responses=True,
+            protocol=2,  # 钉 RESP2，理由见 _redis_sentinel_pool
         )
         # redis-py 集群客户端的槽位缓存是惰性初始化的：首条命令若
         # 是 SUBSCRIBE（框架总线启动即订阅），get_node_from_slot
@@ -171,6 +176,7 @@ def build_service_app():
             if redis_pool is not None
             else RedisStorage(
                 host=redis_host, port=redis_port, password=redis_password,
+                protocol=2,  # 钉 RESP2，理由见 _redis_sentinel_pool
             )
         )
     else:
@@ -194,6 +200,7 @@ def build_service_app():
         else:
             message_bus = RedisMessageBus(
                 host=redis_host, port=redis_port, password=redis_password,
+                protocol=2,  # 钉 RESP2，理由见 _redis_sentinel_pool
             )
     else:
         message_bus = InMemoryMessageBus()
