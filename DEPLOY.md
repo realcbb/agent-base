@@ -79,7 +79,7 @@ chmod 600 .env                   # .env 永不入代码库、永不入包
 | `AGENT_BASE_LEDGER_URL` | 确认台账＋审计账连接（生产：`mysql+pymysql://…`，可与服务存储同实例）；未给时从 `SERVICE_DB_URL` 推导。**本账是确认卡历史与审计的数据来源，生产必须可用**，不可用时网关降级运行但历史缺确认条目、审计缺失 |
 | `GATEWAY_STATE_BACKEND` | 网关状态后端：`memory`（默认，进程内、单副本）｜`redis`（生产高可用：events/runs/限流外置共享，多副本可扩，2026-11-08 双副本实测）；Redis 连接取 `GATEWAY_REDIS_HOST/PORT`，未设回退 `SERVICE_REDIS_*` |
 | `SERVICE_REDIS_MODE` / `GATEWAY_REDIS_MODE` | Redis 拓扑三模式：`standalone`（默认，HOST/PORT 直连）｜`sentinel`（配 `*_REDIS_SENTINELS` 地址组＋`*_REDIS_SENTINEL_MASTER` 服务名，切主自动跟随）｜`cluster`（配 `*_REDIS_CLUSTER_NODES` 启动节点组）。不写 MODE 时按地址变量推断；网关侧未设回退 `SERVICE_REDIS_*`。另 `*_REDIS_PASSWORD` 为主节点/集群密码。**限制：`SERVICE_STORAGE=redis` 不支持 cluster（框架存储有跨槽多键操作），cluster 下存储用 sql**；总线与网关状态三模式均支持 |
-| 协议钉版（代码内） | 服务与网关的全部 Redis 客户端构造均钉 `protocol=2`（RESP2）：redis-py 8 默认 RESP3、每次建连先发 `HELLO 3`，平台 Redis（6.0 以前或兼容引擎）不认 HELLO 会整连失败（2026-11-13 生产实测）。本栈命令面（Streams/Lua/Pub/Sub/Hash）纯 RESP2 语义，钉版无功能损失；换用原生高版本 Redis 也照常工作 |
+| 协议钉版（代码内） | 服务与网关的全部 Redis 客户端构造均钉 `protocol=2`（RESP2）：redis-py 8 默认 RESP3、每次建连先发 `HELLO 3`，平台 Redis（6.0 以前或兼容引擎）不认 HELLO 会整连失败（2026-11-13 生产实测）。**哨兵模式有个坑**：redis-py 给哨兵节点自身建连接时只继承 `socket_*` 参数，钉在 master_for 上的 protocol 管不到它——哨兵连接照旧发 HELLO、死在 discover_master（同日二轮实测）；三处 Sentinel 构造已另行补 `sentinel_kwargs={"protocol": 2, ...}`。本栈命令面（Streams/Lua/Pub/Sub/Hash）纯 RESP2 语义，钉版无功能损失；换用原生高版本 Redis 也照常工作。注：wstest 的哨兵是真 Redis 7、认 HELLO，此坑只能靠假哨兵线级测试抓 |
 | `AGENT_BASE_USAGE_URL` | 计量库连接（生产：`mysql+pymysql://…`，与服务存储同 MySQL 实例即可）；未给时从 `SERVICE_DB_URL` 推导同库；`AGENT_BASE_USAGE_DB` 文件路径仅本地开发 |
 | `MCP_URL` | 网关侧变量：网关按注册表 `url_env` 解析的 MCP 地址（如 demo-tools）。service 不再读此变量；留空时引用它的注册表 MCP 注入失败（注入记账报错，会话本身照常建成） |
 
@@ -126,14 +126,18 @@ command 区分；配置经 ConfigMap/Secret 注入同一套 .env 变量）：
   命名空间级 ResourceQuota/LimitRange/default SA 设置一律不要
   随本系统 apply（会波及业务容器），工作区出入站策略靠 Pod
   自带标签 `agentscope.workspace=true` 精确收口；
-- **RBAC**：基座服务的 ServiceAccount 须在工作区命名空间有
+- **RBAC**：基座服务的 ServiceAccount 只需命名空间内的 Role：
   pods（含 pods/exec）、persistentvolumeclaims 的 get/list/watch/
-  create/delete/patch/update 权限，**外加一条集群级权限**：
-  工作区代码建工作区前会先 GET 命名空间对象本身确认存在，
-  namespaces 是集群作用域资源、命名空间内的 Role 给不了——须
-  ClusterRole 单独给 `get namespaces`（resourceNames 限定为工作
-  区命名空间那一个）＋ClusterRoleBinding（2026-11-08 kind 实测
-  踩到：缺这条时工作区 provision 报 403、整轮对话失败）；
+  create/patch/update（PVC 无 delete——装配 delete_pvc_on_close
+  =False、卷销毁走人工）。**不需要任何集群级权限**：框架建工作
+  区前会先 read_namespace 确认命名空间存在（namespaces 是集群
+  作用域、Role 给不了，缺 ClusterRole 时该步 403 会让 provision
+  整轮失败，2026-11-08 kind 实测、2026-11-13 wstest 对照复现）；
+  共享命名空间场景下 ClusterRole 往往申请不了，装配层已适配：
+  `service/app.py` 的 `_patch_k8s_namespace_ensure` 把该步换成
+  容忍 403 的版本（命名空间由业务预置、本服务就运行其中，403
+  时按部署约定放行并记警告；404 等其余错误照旧抛；永不
+  create_namespace）。生产 YAML 因此不含 ClusterRole/Binding；
   服务只应被网关访问（NetworkPolicy 收口），终端用户与业务
   页面永不直达；
 - **MySQL/Redis**：集群外置或集群内自建均可，连接信息走 Secret
