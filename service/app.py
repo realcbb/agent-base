@@ -61,17 +61,113 @@ class TrustedHeaderIdentityMiddleware:
         await self.app(scope, receive, send)
 
 
+def _parse_redis_addrs(raw: str, default_port: int) -> list:
+    addrs = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        host, _, port = part.rpartition(":")
+        addrs.append((host, int(port or str(default_port))))
+    return addrs
+
+
+def _redis_mode() -> str:
+    """Redis 拓扑模式：standalone｜sentinel｜cluster。
+
+    SERVICE_REDIS_MODE 显式指定优先；未指定时按地址变量推断
+    （配了 SENTINELS 走哨兵、配了 CLUSTER_NODES 走集群），保证
+    既有部署 env 不变、行为不变。
+    """
+    mode = env("SERVICE_REDIS_MODE", "").strip().lower()
+    if mode:
+        return mode
+    if env("SERVICE_REDIS_SENTINELS", ""):
+        return "sentinel"
+    if env("SERVICE_REDIS_CLUSTER_NODES", ""):
+        return "cluster"
+    return "standalone"
+
+
+def _redis_sentinel_pool():
+    """哨兵连接池：框架的总线/存储都接受外部 connection_pool 并
+    原样使用，池由 redis.asyncio.sentinel 维护——取连接时按服务
+    名问哨兵要当前主节点，切主后新连接自动跟随，不改框架、也
+    不用重启本服务。decode_responses 与框架自建池一致（True）。
+    """
+    from redis.asyncio.sentinel import Sentinel
+
+    addrs = _parse_redis_addrs(env("SERVICE_REDIS_SENTINELS", ""), 26379)
+    master = Sentinel(addrs, socket_connect_timeout=5).master_for(
+        env("SERVICE_REDIS_SENTINEL_MASTER", "mymaster"),
+        db=0,
+        password=env("SERVICE_REDIS_PASSWORD") or None,
+        decode_responses=True,
+    )
+    return master.connection_pool
+
+
+class ClusterRedisMessageBus(RedisMessageBus):
+    """Cluster 模式的总线。
+
+    框架 RedisMessageBus 的客户端构造写死单机
+    Redis(connection_pool=...)，集群客户端套不进它留的池子口；
+    但其命令面已逐项核过源码——单键 Lua、单键 delete、Pub/Sub，
+    全是集群兼容操作。故只覆写客户端的建立/关闭，命令面仍走
+    框架原实现。
+    """
+
+    def __init__(self, startup_nodes, password=None):
+        super().__init__(host="127.0.0.1", port=6379)  # 占位，不会被用
+        self._startup_nodes = startup_nodes
+        self._cluster_password = password
+
+    async def __aenter__(self):
+        from redis.asyncio.cluster import ClusterNode, RedisCluster
+
+        self._client = RedisCluster(
+            startup_nodes=[
+                ClusterNode(h, p) for h, p in self._startup_nodes
+            ],
+            password=self._cluster_password,
+            decode_responses=True,
+        )
+        return self
+
+    async def aclose(self) -> None:
+        client = getattr(self, "_client", None)
+        if client is not None:
+            await client.aclose()
+            self._client = None
+
+
 def build_service_app():
     load_env()
     storage_kind = env("SERVICE_STORAGE", "sql")
     redis_host = env("SERVICE_REDIS_HOST", "127.0.0.1")
     redis_port = int(env("SERVICE_REDIS_PORT", "6379"))
+    redis_mode = _redis_mode()
+    redis_password = env("SERVICE_REDIS_PASSWORD") or None
+    redis_pool = _redis_sentinel_pool() if redis_mode == "sentinel" else None
     # 总线与存储独立选择（2026-11-08 解耦）：SERVICE_BUS 未设置时沿
     # 旧捆绑行为，保证既有部署与冒烟的 env 不变、行为不变。
     bus_kind = env("SERVICE_BUS", "redis" if storage_kind == "redis" else "memory")
 
     if storage_kind == "redis":
-        storage = RedisStorage(host=redis_host, port=redis_port)
+        if redis_mode == "cluster":
+            raise RuntimeError(
+                "SERVICE_STORAGE=redis 不支持 cluster 模式：框架 "
+                "RedisStorage 存在跨槽多键操作（多键 delete、跨键 "
+                "pipeline），在 Redis Cluster 上会 CROSSSLOT 失败；"
+                "请用默认的 sql 存储（生产组合即 MySQL）",
+            )
+        storage = (
+            RedisStorage(connection_pool=redis_pool)
+            if redis_pool is not None
+            else RedisStorage(
+                host=redis_host, port=redis_port, password=redis_password,
+            )
+        )
     else:
         db_url = env(
             "SERVICE_DB_URL",
@@ -83,7 +179,17 @@ def build_service_app():
         storage = AsyncSQLAlchemyStorage(url=db_url, create_tables=True)
 
     if bus_kind == "redis":
-        message_bus = RedisMessageBus(host=redis_host, port=redis_port)
+        if redis_mode == "cluster":
+            message_bus = ClusterRedisMessageBus(
+                _parse_redis_addrs(env("SERVICE_REDIS_CLUSTER_NODES", ""), 6379),
+                password=redis_password,
+            )
+        elif redis_pool is not None:
+            message_bus = RedisMessageBus(connection_pool=redis_pool)
+        else:
+            message_bus = RedisMessageBus(
+                host=redis_host, port=redis_port, password=redis_password,
+            )
     else:
         message_bus = InMemoryMessageBus()
 

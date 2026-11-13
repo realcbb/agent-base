@@ -122,49 +122,150 @@ class MemoryState:
         return True
 
 
+def _parse_addrs(raw: str, default_port: int) -> list:
+    addrs = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        host, _, port = part.rpartition(":")
+        addrs.append((host, int(port or str(default_port))))
+    return addrs
+
+
 class RedisState:
-    """Redis 状态后端（生产多副本）。"""
+    """Redis 状态后端（生产多副本）。支持三种拓扑（mode）：
+
+    - standalone：host:port 直连；
+    - sentinel：哨兵地址组＋服务名，客户端经哨兵问当前主节点，
+      切主后新连接自动跟随；
+    - cluster：集群启动节点组，走 RedisCluster 客户端。事件键名
+      带 {session_id} 哈希标签（append 的 pipeline 需同槽），其余
+      模式下花括号只是普通字符、行为不变。
+    """
 
     kind = "redis"
 
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        *,
+        mode: str = "standalone",
+        sentinels: list | None = None,
+        master_name: str = "mymaster",
+        cluster_nodes: list | None = None,
+        password: str | None = None,
+    ) -> None:
         import redis
 
-        self._r = redis.Redis(
-            host=host, port=port, decode_responses=True,
-            socket_connect_timeout=5,
-        )
+        self._r_cached = None
+        self._mode = mode
         self._host = host
         self._port = port
+        self._sentinels = sentinels
+        self._master_name = master_name
+        self._cluster_nodes = cluster_nodes
+        self._password = password
+        if mode == "sentinel":
+            import redis.sentinel
+
+            self._r = redis.sentinel.Sentinel(
+                sentinels, socket_connect_timeout=5,
+            ).master_for(
+                master_name,
+                decode_responses=True,
+                password=password,
+                socket_connect_timeout=5,
+            )
+        elif mode == "cluster":
+            # RedisCluster 同步客户端构造期即做拓扑发现（连不上直
+            # 接抛错），与单机/哨兵的惰性构造不同——延迟到首次实
+            # 际调用时再建（见下方 _r 属性）。
+            self._r = None
+        else:
+            self._r = redis.Redis(
+                host=host, port=port, decode_responses=True,
+                password=password,
+                socket_connect_timeout=5,
+            )
+
+    @property
+    def _r(self):  # type: ignore[no-redef]
+        if self._r_cached is None:
+            import redis.cluster
+
+            self._r_cached = redis.cluster.RedisCluster(
+                startup_nodes=[
+                    redis.cluster.ClusterNode(h, p)
+                    for h, p in self._cluster_nodes or []
+                ],
+                decode_responses=True,
+                password=self._password,
+                socket_connect_timeout=5,
+            )
+        return self._r_cached
+
+    @_r.setter
+    def _r(self, value) -> None:
+        self._r_cached = value
+
+    def _async_client(self):
+        """follow_events 用的异步客户端，与同步侧同拓扑。"""
+        import redis.asyncio as aioredis
+
+        if self._mode == "sentinel":
+            import redis.asyncio.sentinel
+
+            return redis.asyncio.sentinel.Sentinel(
+                self._sentinels, socket_connect_timeout=5,
+            ).master_for(
+                self._master_name,
+                decode_responses=True,
+                password=self._password,
+                socket_connect_timeout=5,
+            )
+        if self._mode == "cluster":
+            import redis.asyncio.cluster
+
+            return redis.asyncio.cluster.RedisCluster(
+                startup_nodes=[
+                    redis.asyncio.cluster.ClusterNode(h, p)
+                    for h, p in self._cluster_nodes or []
+                ],
+                decode_responses=True,
+                password=self._password,
+                socket_connect_timeout=5,
+            )
+        return aioredis.Redis(
+            host=self._host, port=self._port, decode_responses=True,
+            password=self._password,
+        )
 
     # ---------------------------------------------------------- events
     def append_event(self, event: dict) -> None:
         sid = event["session_id"]
         raw = json.dumps(event, ensure_ascii=False)
         pipe = self._r.pipeline()
-        pipe.rpush(f"gw:events:{sid}", raw)
-        pipe.ltrim(f"gw:events:{sid}", -_EVENTS_CAP, -1)
-        pipe.publish(f"gw:live:{sid}", raw)
+        pipe.rpush(f"gw:events:{{{sid}}}", raw)
+        pipe.ltrim(f"gw:events:{{{sid}}}", -_EVENTS_CAP, -1)
+        pipe.publish(f"gw:live:{{{sid}}}", raw)
         pipe.execute()
 
     def list_events(
         self, session_id: str, after_event_id: str | None = None,
     ) -> list[dict]:
-        raw = self._r.lrange(f"gw:events:{session_id}", 0, -1)
+        raw = self._r.lrange(f"gw:events:{{{session_id}}}", 0, -1)
         return _after([json.loads(x) for x in raw], after_event_id)
 
     async def follow_events(
         self, session_id: str, after_event_id: str | None = None,
     ):
-        import redis.asyncio as aioredis
-
-        client = aioredis.Redis(
-            host=self._host, port=self._port, decode_responses=True,
-        )
+        client = self._async_client()
         pubsub = client.pubsub()
         # 先订阅再回放：回放期间新事件进 pubsub 缓冲，不丢；重叠部分
         # 靠 seen 集合去重。
-        await pubsub.subscribe(f"gw:live:{session_id}")
+        await pubsub.subscribe(f"gw:live:{{{session_id}}}")
         seen: set[str] = set()
         try:
             for ev in self.list_events(session_id, after_event_id):
@@ -199,6 +300,17 @@ class RedisState:
 
     # ------------------------------------------------------------- runs
     def put_run(self, run: dict) -> None:
+        if self._mode == "cluster":
+            # 两键分属不同槽位，集群下不能同 pipeline（CROSSSLOT）；
+            # 顺序执行，语义不变（这对写入原本也不依赖跨键原子性）。
+            self._r.set(
+                f"gw:run:{run['run_id']}",
+                json.dumps(run, ensure_ascii=False),
+            )
+            self._r.rpush(
+                f"gw:session_runs:{run['session_id']}", run["run_id"],
+            )
+            return
         pipe = self._r.pipeline()
         pipe.set(
             f"gw:run:{run['run_id']}",
@@ -246,14 +358,41 @@ class RedisState:
 
 
 def build_state():
-    """按 GATEWAY_STATE_BACKEND 建状态后端（默认 memory）。"""
+    """按 GATEWAY_STATE_BACKEND 建状态后端（默认 memory）。
+
+    redis 拓扑三模式（standalone｜sentinel｜cluster）：变量优先读
+    GATEWAY_REDIS_*，缺项回退 SERVICE_REDIS_*（与 HOST/PORT 的既有
+    回退口径一致）；模式未显式给时按地址变量推断。
+    """
     kind = env("GATEWAY_STATE_BACKEND", "memory")
     if kind == "redis":
+        def pick(name: str) -> str:
+            return env(f"GATEWAY_REDIS_{name}") or env(
+                f"SERVICE_REDIS_{name}", "",
+            )
+
+        sentinels_raw = pick("SENTINELS")
+        cluster_raw = pick("CLUSTER_NODES")
+        mode = (pick("MODE") or "").strip().lower()
+        if not mode:
+            mode = (
+                "sentinel" if sentinels_raw
+                else "cluster" if cluster_raw
+                else "standalone"
+            )
         host = env("GATEWAY_REDIS_HOST") or env(
             "SERVICE_REDIS_HOST", "127.0.0.1",
         )
         port = int(
             env("GATEWAY_REDIS_PORT") or env("SERVICE_REDIS_PORT", "6379"),
         )
-        return RedisState(host, port)
+        return RedisState(
+            host,
+            port,
+            mode=mode,
+            sentinels=_parse_addrs(sentinels_raw, 26379),
+            master_name=pick("SENTINEL_MASTER") or "mymaster",
+            cluster_nodes=_parse_addrs(cluster_raw, 6379),
+            password=pick("PASSWORD") or None,
+        )
     return MemoryState()

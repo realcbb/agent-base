@@ -78,6 +78,7 @@ chmod 600 .env                   # .env 永不入代码库、永不入包
 | `GATEWAY_SESSION_QUEUE_TIMEOUT_SECS` | 同会话消息排队等待上限，默认 180 秒，超限回 409 `SESSION_BUSY` |
 | `AGENT_BASE_LEDGER_URL` | 确认台账＋审计账连接（生产：`mysql+pymysql://…`，可与服务存储同实例）；未给时从 `SERVICE_DB_URL` 推导。**本账是确认卡历史与审计的数据来源，生产必须可用**，不可用时网关降级运行但历史缺确认条目、审计缺失 |
 | `GATEWAY_STATE_BACKEND` | 网关状态后端：`memory`（默认，进程内、单副本）｜`redis`（生产高可用：events/runs/限流外置共享，多副本可扩，2026-11-08 双副本实测）；Redis 连接取 `GATEWAY_REDIS_HOST/PORT`，未设回退 `SERVICE_REDIS_*` |
+| `SERVICE_REDIS_MODE` / `GATEWAY_REDIS_MODE` | Redis 拓扑三模式：`standalone`（默认，HOST/PORT 直连）｜`sentinel`（配 `*_REDIS_SENTINELS` 地址组＋`*_REDIS_SENTINEL_MASTER` 服务名，切主自动跟随）｜`cluster`（配 `*_REDIS_CLUSTER_NODES` 启动节点组）。不写 MODE 时按地址变量推断；网关侧未设回退 `SERVICE_REDIS_*`。另 `*_REDIS_PASSWORD` 为主节点/集群密码。**限制：`SERVICE_STORAGE=redis` 不支持 cluster（框架存储有跨槽多键操作），cluster 下存储用 sql**；总线与网关状态三模式均支持 |
 | `AGENT_BASE_USAGE_URL` | 计量库连接（生产：`mysql+pymysql://…`，与服务存储同 MySQL 实例即可）；未给时从 `SERVICE_DB_URL` 推导同库；`AGENT_BASE_USAGE_DB` 文件路径仅本地开发 |
 | `MCP_URL` | 网关侧变量：网关按注册表 `url_env` 解析的 MCP 地址（如 demo-tools）。service 不再读此变量；留空时引用它的注册表 MCP 注入失败（注入记账报错，会话本身照常建成） |
 
