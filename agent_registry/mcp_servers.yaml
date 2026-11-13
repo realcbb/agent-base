@@ -2,8 +2,9 @@
 # 工具权限级按 8.2 三级申报：ALLOW 只读放行 / ASK 写入须确认 / DENY 禁登。
 # tenants：归属租户（分项目登记）；scope：default 建会话时由网关按租户
 # 全量注入会话工作区，optional 只登记不自动注入。
-# 注：demo-tools 同时是 service 装配的全局默认 MCP（default_mcps），
-# 网关注入时发现工作区已有同名会跳过，行为与改造前一致。
+# 注：MCP 进工作区的唯一路径是网关按本表注入；service 装配不种
+# default_mcps。url_env 由网关进程的环境变量解析（如 MCP_URL），
+# 网关部署时须给到该变量，缺失时该条注入记账报错、会话照常建成。
 mcp_servers:
   - name: demo-tools
     transport: streamable_http

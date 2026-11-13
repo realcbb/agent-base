@@ -40,7 +40,6 @@ services:
       SERVICE_REDIS_HOST: redis
       SERVICE_REDIS_PORT: "6379"
       SERVICE_WORKSPACE_DIR: /app/data/workspaces
-      MCP_URL: http://mcp:8200/mcp
     volumes:
       - agentbase-data:/app/data
     depends_on:
@@ -59,6 +58,7 @@ services:
       GATEWAY_REDIS_HOST: redis
       GATEWAY_REDIS_PORT: "6379"
       SERVICE_URL: http://service:8100
+      MCP_URL: http://mcp:8200/mcp
       AGENT_BASE_USAGE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-agentbase-dev}@mysql:3306/agentbase?charset=utf8mb4
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

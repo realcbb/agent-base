@@ -8,8 +8,9 @@
 - message_bus：由 SERVICE_BUS 独立选择（memory｜redis），与存储
   解耦——生产组合为「MySQL 存储＋Redis 总线」。SERVICE_BUS 未设置
   时沿旧行为（存储 redis 则总线 redis、否则进程内）兼容既有部署；
-- workspace_manager：LocalWorkspaceManager（per_session 隔离），
-  default_mcps 挂 demo MCP（MCP_URL 存在时）；
+- workspace_manager：LocalWorkspaceManager（per_session 隔离）；
+  装配不种 default_mcps——MCP 一律走注册表，由网关在建会话后
+  按租户注入（agent_registry/mcp_servers.yaml）；
 - extra_credentials=[MockCredential] 注册 mock 模型；
 - enable_channel_worker=False / enable_scheduler=False：排查清单
   H1/D1/D2 的处置——频道子系统（个人助理的 IM 入口假设＋凭证
@@ -35,8 +36,6 @@ from agentscope.app.workspace_manager import (
     IsolationPolicy,
     LocalWorkspaceManager,
 )
-from agentscope.mcp import MCPClient
-from agentscope.mcp._config import HttpMCPConfig
 
 from common.config import env, load_env, resolve_path
 from service.access_policy import TenantPrefixPolicy
@@ -88,17 +87,6 @@ def build_service_app():
     else:
         message_bus = InMemoryMessageBus()
 
-    default_mcps = []
-    mcp_url = env("MCP_URL")
-    if mcp_url:
-        default_mcps.append(
-            MCPClient(
-                name="demo-tools",
-                is_stateful=False,
-                mcp_config=HttpMCPConfig(url=mcp_url),
-            ),
-        )
-
     # 【装配锁定 · 勿改】隔离粒度必须是 PER_SESSION：框架管理器默认
     # PER_AGENT（同 agent 新会话继承旧工作区文件＝个人桌面语义＋数据
     # 串扰面，排查清单 W2）；PER_USER 更是直接跟人走。改回任何一档
@@ -128,7 +116,6 @@ def build_service_app():
             image_pull_secrets=pull_secrets or None,
             storage_class=env("SERVICE_K8S_STORAGE_CLASS") or None,
             storage_size=env("SERVICE_K8S_STORAGE_SIZE", "1Gi"),
-            default_mcps=default_mcps or None,
         )
     else:
         workspace_dir = resolve_path(
@@ -138,7 +125,6 @@ def build_service_app():
         workspace_manager = LocalWorkspaceManager(
             basedir=str(workspace_dir),
             isolation=IsolationPolicy.PER_SESSION,
-            default_mcps=default_mcps or None,
         )
 
     # 【装配锁定 · 勿改】跨租户姿态：默认全拒是底线。框架不传策略时

@@ -613,8 +613,8 @@ class AgentScopeAdapter:
         """建会话后按租户注入 default 的 MCP 与技能（第 4 项）。
 
         MCP：注册表全量配置直加 POST /workspace/mcp（禁用
-        from-library）；工作区已有同名（例如装配 default_mcps 种入
-        的 demo-tools）则跳过，不重复加。技能：本体从 skills_store
+        from-library）；工作区已有同名（重复注入、或会话中已手动
+        加过）则跳过，不重复加。技能：本体从 skills_store
         经 POST /workspace/skill/upload 直传（不回写用户库）。
         scope=optional 的一律不注入。逐项记账、失败不抛错（会话已
         建成，注入是增强面），结果落在 session.injection_report。
