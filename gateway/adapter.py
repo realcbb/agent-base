@@ -656,14 +656,9 @@ class AgentScopeAdapter:
                 # 整块透传：注册表的 config 就是框架 mcp_config 的
                 # 完整 JSON（url/headers/timeout 等都在 ConfigMap
                 # 里直配），网关只包 client_config 外壳，不拆不拼
-                # （2026-11-14 用户裁定，去掉 url_env 间接层）。
+                # （2026-11-14 用户裁定，去掉 url_env 间接层，
+                # 不留旧格式兼容分支——存量条目已全部迁到 config）。
                 mcp_config = dict(config)
-            elif server.get("url_env"):
-                # 旧格式兼容：url_env 存网关 env 的变量名。
-                mcp_config = {
-                    "type": "http_mcp",
-                    "url": env(server["url_env"]),
-                }
             else:
                 report["mcp"][name] = "failed:config-missing"
                 continue

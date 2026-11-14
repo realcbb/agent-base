@@ -6,8 +6,7 @@
 # default_mcps。config 是框架 mcp_config 的完整 JSON（http_mcp：
 # {type, url, headers?, timeout?}；stdio_mcp：{type, command, args?,
 # env?, cwd?}），地址等直接写在这里，网关原样透传、不再经 env
-# 间接层（2026-11-14 定版）。旧条目的 url_env（网关 env 变量名）
-# 仍兼容，新登记一律用 config。
+# 间接层（2026-11-14 定版）。
 mcp_servers:
   - name: demo-tools
     config:
