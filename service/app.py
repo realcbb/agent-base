@@ -128,6 +128,62 @@ def _patch_k8s_namespace_ensure():
     K8sWorkspace._ensure_namespace = _ensure_namespace_shared
 
 
+def _patch_k8s_write_stream():
+    """技能包落盘解死锁（装配层补丁，框架本体不动）。
+
+    框架 K8sBackend.write_stream 用 exec 把字节流喂给 Pod 里的
+    ``cat > <path>``，写完只发一个空的 0 通道帧当 EOF——K8s
+    exec 协议没有这种信号：cat 的 stdin 只要 websocket 不断就
+    一直开着，而 _exec_ws_stdin 又在等进程退出才肯收尾，天生
+    死锁。2026-11-14 实测：嵌套 kind 与宿主机直跑的 k3s（真
+    kubelet）同签名复现——tar 完整落盘、cat 永不退出、请求永
+    不返回（旧「嵌套集群怪癖」结论作废）。
+
+    换法：write_stream 的唯一调用方是 add_skill_archive（包
+    体上游有解包上限），先把流在服务侧缓冲成整块，再走原
+    _exec_ws_stdin、远端命令换成 ``head -c <总字节数>``——读
+    满自行退出，终止由远端进程退出驱动，不再依赖关流信号。
+    缓冲上限 64MB，超限响亮报错（真有这种包应走别的通道）。
+    """
+    import posixpath
+
+    from agentscope.workspace._k8s._k8s_backend import K8sBackend
+
+    if getattr(K8sBackend.write_stream, "_sized_head", False):
+        return
+
+    _max_buffer = 64 * 1024 * 1024
+
+    async def _write_stream_sized(self, path, stream):
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in stream:
+            total += len(chunk)
+            if total > _max_buffer:
+                raise RuntimeError(
+                    f"write_stream 缓冲超限（>{_max_buffer} 字"
+                    f"节）：{path!r}",
+                )
+            chunks.append(chunk)
+        parent = posixpath.dirname(path) or "/"
+        await self.exec_shell(["mkdir", "-p", parent])
+        await self._exec_ws_stdin(
+            [
+                "sh",
+                "-c",
+                'head -c "$1" > "$2"',
+                "sh",
+                str(total),
+                path,
+            ],
+            chunks,
+            path,
+        )
+
+    _write_stream_sized._sized_head = True  # type: ignore[attr-defined]
+    K8sBackend.write_stream = _write_stream_sized  # type: ignore[method-assign]
+
+
 def _redis_sentinel_pool():
     """哨兵连接池：框架的总线/存储都接受外部 connection_pool 并
     原样使用，池由 redis.asyncio.sentinel 维护——取连接时按服务
@@ -272,6 +328,7 @@ def build_service_app():
         )
 
         _patch_k8s_namespace_ensure()
+        _patch_k8s_write_stream()
 
         pull_secrets = [
             s.strip()

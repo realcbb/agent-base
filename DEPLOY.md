@@ -136,6 +136,11 @@ command 区分；配置经 ConfigMap/Secret 注入同一套 .env 变量）：
   命名空间级 ResourceQuota/LimitRange/default SA 设置一律不要
   随本系统 apply（会波及业务容器），工作区出入站策略靠 Pod
   自带标签 `agentscope.workspace=true` 精确收口；
+  **技能落盘补丁**（装配层，框架本体不动）：框架 write_stream 以
+  空帧当 EOF 喂 `cat` 的写法在现行 kubelet 下死锁（2026-11-14
+  kind 与宿主机直跑 k3s 同签名实测——包完整落盘、cat 永不退
+  出），装配层已换成服务侧缓冲＋`head -c <字节数>` 定长读，
+  上线前在目标集群建一个带技能的会话验落盘即可；
 - **RBAC**：基座服务的 ServiceAccount 只需命名空间内的 Role：
   pods（含 pods/exec）、persistentvolumeclaims 的 get/list/watch/
   create/patch/update（PVC 无 delete——装配 delete_pvc_on_close
