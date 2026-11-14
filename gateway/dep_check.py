@@ -10,17 +10,36 @@
 满足方只有两类（系统级的东西在工作区镜像构建时定死，不归这里管）：
 
 - python：工作区镜像技能公共环境的清单（pip freeze）里版本满足，
-  或技能包内自带兼容 wheel——解释器是 Python 3.11、生产为 arm64
-  单架构，故纯轮（py3-none-any / cp311-abi3-any 等）直接可，平台轮
-  须含 aarch64（x86_64 仅 wstest 测试环境用、带不带随意）；镜像已
-  满足又自带 wheel 的，在发布响应里记 redundant 提示多余、不拦截；
+  或技能包内自带兼容 wheel——解释器是 Python 3.11，纯轮
+  （py3-none-any / cp311-abi3-any 等）直接可，平台轮须覆盖配置要求
+  的架构（网关 env GATEWAY_SKILL_REQUIRED_ARCHES，逗号分隔、认
+  arm64/amd64 别名，默认 aarch64；双架构配 aarch64,x86_64）；镜像
+  已满足又自带 wheel 的，在发布响应里记 redundant 提示多余、不拦截；
 - mcp：注册表里对发布租户可见的 MCP Server 名单里有这个名字。
 
 镜像清单缺失（还没随注册表 ConfigMap 挂进来）时，python 的镜像比对
 无从做起：未被 wheel 满足的项记 unverified 放行并在发布响应里显形，
 不静默跳过；清单就位后同一路径自动转严格（不满足回 422）。
 """
+import os
 import re
+
+_ARCH_ALIASES = {
+    "aarch64": "aarch64", "arm64": "aarch64",
+    "x86_64": "x86_64", "amd64": "x86_64",
+}
+
+
+def required_arches_from_env() -> tuple[str, ...]:
+    """平台轮须覆盖的架构：env GATEWAY_SKILL_REQUIRED_ARCHES 配置，
+    逗号分隔、认 arm64/amd64 别名；未配或全不认识时默认 ("aarch64",)。"""
+    raw = os.environ.get("GATEWAY_SKILL_REQUIRED_ARCHES", "")
+    out: list[str] = []
+    for tok in raw.replace(";", ",").split(","):
+        arch = _ARCH_ALIASES.get(tok.strip().lower())
+        if arch and arch not in out:
+            out.append(arch)
+    return tuple(out) or ("aarch64",)
 
 _NAME_RE = re.compile(r"^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9])$")
 _CLAUSE_RE = re.compile(r"^(==|!=|>=|<=|~=|>|<)\s*([A-Za-z0-9][A-Za-z0-9.!*+-]*)$")
@@ -158,13 +177,14 @@ def _interp_ok(py_tag: str, abi_tag: str) -> bool:
 
 def _wheel_set_verdict(
     wheels: list[str], want_name: str, clauses,
+    required_arches: tuple[str, ...] = ("aarch64",),
 ) -> tuple[bool, str]:
     """包内同名 wheel 合起来判定一条 python 依赖是否被自带 wheel 满足。
 
     专家在 x86 机器上用 pip download 按平台取轮，产物天然是一架构
     一个文件，故架构覆盖按【集合】判：版本满足约束且解释器标签
-    兼容的文件里，有平台无关轮（any）即满足；否则须有生产架构
-    aarch64 的文件（x86_64 只影响 wstest 测试环境、缺了不拦）。
+    兼容的文件里，有平台无关轮（any）即满足；否则平台轮须合起来
+    覆盖 required_arches（配置口径，默认只有生产架构 aarch64）。
     不满足返回给发布者看的原因。
     """
     seen = False
@@ -189,12 +209,14 @@ def _wheel_set_verdict(
             arches.add("x86_64")
         if any("aarch64" in p for p in plats):
             arches.add("aarch64")
-    if "aarch64" in arches:
+    if set(required_arches) <= arches:
         return True, "ok"
     if arches:
+        missing = [a for a in required_arches if a not in arches]
         return False, (
-            "平台轮只有 x86_64，缺生产架构 aarch64"
-            "（或换 py3-none-any 通用轮）"
+            f"平台轮缺 {'、'.join(missing)}"
+            f"（须覆盖 {'+'.join(required_arches)}，"
+            "或换 py3-none-any 通用轮）"
         )
     if interp_bad:
         return False, (
@@ -213,7 +235,10 @@ def check_dependencies(
     package_paths: list[str],
     image_manifest: dict[str, str] | None,
     visible_mcp: set[str],
+    required_arches: tuple[str, ...] | None = None,
 ) -> dict:
+    if required_arches is None:
+        required_arches = required_arches_from_env()
     """逐项核对。返回 {"problems", "unverified", "redundant"}，
     条目形如 {"kind", "entry", "reason"}。problems 非空＝发布应拒绝；
     redundant 是镜像已满足却又自带 wheel 的多余项（只提示不拦截）。"""
@@ -223,7 +248,9 @@ def check_dependencies(
     wheels = [p for p in package_paths if p.endswith(".whl")]
     for entry in requires.get("python", []):
         name, clauses = parse_python_requirement(entry)
-        wheel_ok, wheel_why = _wheel_set_verdict(wheels, name, clauses)
+        wheel_ok, wheel_why = _wheel_set_verdict(
+            wheels, name, clauses, required_arches,
+        )
         if image_manifest is None:
             if not wheel_ok:
                 unverified.append({
