@@ -10,9 +10,9 @@ AgentScope Service 的逐次调用计量记录——不落汇总数、只落原�
    mysql+pymysql://用户:密码@主机:3306/库名?charset=utf8mb4，
    与基座服务存储同实例即可——本表名为 usage_calls，与服务表不冲突）；
 2. 未给时从 SERVICE_DB_URL 推导（aiomysql→pymysql、aiosqlite→sqlite），
-   即默认与服务存储同库；
-3. 旧变量 AGENT_BASE_USAGE_DB（文件路径）仍可用，映射为 sqlite URL
-   ——仅本地开发/冒烟的便利，生产配置不得出现 sqlite。
+   即默认与服务存储同库；两者皆无则落库不可用（healthy=False），
+   不再静默落本地 sqlite 文件——多副本网关下各写各的、账目分裂
+   （2026-11-14 用户裁定去掉兜底；旧变量 AGENT_BASE_USAGE_DB 随之退役）。
 
 口径：
 - 一行 = 一次模型调用（adapter 在 ModelCallEndEvent 处写入）。
@@ -39,7 +39,7 @@ from sqlalchemy import (
     select,
 )
 
-from common.config import env, resolve_path
+from common.config import env
 
 logger = logging.getLogger(__name__)
 
@@ -68,16 +68,13 @@ def default_usage_url() -> str:
     url = env("AGENT_BASE_USAGE_URL")
     if url:
         return url
-    legacy = env("AGENT_BASE_USAGE_DB")
-    if legacy:
-        return f"sqlite:///{resolve_path(legacy)}"
     service_url = env("SERVICE_DB_URL", "")
     if service_url:
         derived = service_url.replace("+aiomysql", "+pymysql").replace(
             "+aiosqlite", "",
         )
         return derived
-    return f"sqlite:///{resolve_path('data/usage.db')}"
+    return ""
 
 
 class UsageStore:
@@ -95,6 +92,11 @@ class UsageStore:
         self._engine = None
         self._failed = False
         try:
+            if not self.url:
+                raise RuntimeError(
+                    "未配置连接（AGENT_BASE_USAGE_URL 与 "
+                    "SERVICE_DB_URL 均未设置）",
+                )
             if self.url.startswith("sqlite:///"):
                 Path(self.url[len("sqlite:///"):]).parent.mkdir(
                     parents=True, exist_ok=True,

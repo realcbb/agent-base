@@ -19,7 +19,9 @@
   与本仓储之后的变化无关（会话钉住语义不变）。
 
 连接（AGENT_BASE_SKILLS_URL，同步驱动 URL），解析顺序与 usage
-一致：显式 env → 从 SERVICE_DB_URL 推导 → 本地 sqlite 兜底。
+一致：显式 env → 从 SERVICE_DB_URL 推导；两者皆无则仓储不可用
+（healthy=False），不再静默落本地 sqlite 文件——多副本网关下
+各写各的、账目分裂（2026-11-14 用户裁定去掉兜底）。
 """
 import hashlib
 import io
@@ -47,7 +49,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects import mysql
 
-from common.config import env, resolve_path
+from common.config import env
 from gateway.dep_check import parse_requires
 
 logger = logging.getLogger(__name__)
@@ -110,7 +112,7 @@ def default_skills_url() -> str:
         return service_url.replace("+aiomysql", "+pymysql").replace(
             "+aiosqlite", "",
         )
-    return f"sqlite:///{resolve_path('data/skills.db')}"
+    return ""
 
 
 class SkillPackageError(ValueError):
@@ -238,6 +240,11 @@ class SkillStore:
         self._s3 = None
         self._s3_bucket = env("SKILL_OSS_BUCKET")
         try:
+            if not self.url:
+                raise RuntimeError(
+                    "未配置连接（AGENT_BASE_SKILLS_URL 与 "
+                    "SERVICE_DB_URL 均未设置）",
+                )
             if self.url.startswith("sqlite:///"):
                 Path(self.url[len("sqlite:///"):]).parent.mkdir(
                     parents=True, exist_ok=True,

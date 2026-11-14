@@ -13,8 +13,9 @@
   只追加的账，与运行日志分开。
 
 连接（AGENT_BASE_LEDGER_URL，同步驱动 URL），解析顺序与
-usage_store 一致：显式 URL → 从 SERVICE_DB_URL 推导 →
-本地文件 data/ledger.db（仅开发/冒烟）。
+usage_store 一致：显式 URL → 从 SERVICE_DB_URL 推导；两者皆无
+则落库不可用（healthy=False），不静默落本地 sqlite 文件
+（2026-11-14 用户裁定去掉兜底）。
 
 失败口径与 usage_store 一致：落库不可用时静默降级
 （healthy=False），绝不拖垮网关主链；但要在日志里留痕，
@@ -39,7 +40,7 @@ from sqlalchemy import (
     select,
 )
 
-from common.config import env, resolve_path
+from common.config import env
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ def default_ledger_url() -> str:
         return service_url.replace("+aiomysql", "+pymysql").replace(
             "+aiosqlite", "",
         )
-    return f"sqlite:///{resolve_path('data/ledger.db')}"
+    return ""
 
 
 class LedgerStore:
@@ -104,6 +105,11 @@ class LedgerStore:
         self._engine = None
         self._failed = False
         try:
+            if not self.url:
+                raise RuntimeError(
+                    "未配置连接（AGENT_BASE_LEDGER_URL 与 "
+                    "SERVICE_DB_URL 均未设置）",
+                )
             if self.url.startswith("sqlite:///"):
                 Path(self.url[len("sqlite:///"):]).parent.mkdir(
                     parents=True, exist_ok=True,
