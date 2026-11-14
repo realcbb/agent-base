@@ -250,6 +250,11 @@ class SkillStore:
     def _init_s3(self) -> None:
         if not self._s3_bucket:
             raise RuntimeError("SKILL_BLOB_BACKEND=s3 但未配 SKILL_OSS_BUCKET")
+        self._s3 = self._build_s3_client()
+        self._s3.head_bucket(Bucket=self._s3_bucket)
+
+    @staticmethod
+    def _build_s3_client():
         import boto3  # 懒加载：db 后端不需要装
 
         kwargs: dict = {}
@@ -264,8 +269,20 @@ class SkillStore:
         if access and secret:
             kwargs["aws_access_key_id"] = access
             kwargs["aws_secret_access_key"] = secret
-        self._s3 = boto3.client("s3", **kwargs)
-        self._s3.head_bucket(Bucket=self._s3_bucket)
+        return boto3.client("s3", **kwargs)
+
+    def _read_client(self):
+        """读 s3 行用的客户端：本实例若不是 s3 模式（没在初始化时
+        建客户端），按 env 懒建一个——版本行按行记后端，db 模式的
+        实例也必须能读回历史上以 s3 写入的包（切换后端/混跑期
+        不丢老包）。env 里没有桶名则明确报错，不裸崩。"""
+        if self._s3 is None:
+            if not self._s3_bucket:
+                raise RuntimeError(
+                    "版本包存于 s3，但当前未配 SKILL_OSS_BUCKET，无法读取",
+                )
+            self._s3 = self._build_s3_client()
+        return self._s3
 
     @property
     def healthy(self) -> bool:
@@ -280,7 +297,9 @@ class SkillStore:
 
     def _blob_get(self, backend: str, ref: str, inline: bytes | None) -> bytes:
         if backend == "s3":
-            obj = self._s3.get_object(Bucket=self._s3_bucket, Key=ref)
+            obj = self._read_client().get_object(
+                Bucket=self._s3_bucket, Key=ref,
+            )
             return obj["Body"].read()
         return inline or b""
 
