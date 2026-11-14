@@ -3,12 +3,16 @@
 # tenants：归属租户（分项目登记）；scope：default 建会话时由网关按租户
 # 全量注入会话工作区，optional 只登记不自动注入。
 # 注：MCP 进工作区的唯一路径是网关按本表注入；service 装配不种
-# default_mcps。url_env 由网关进程的环境变量解析（如 MCP_URL），
-# 网关部署时须给到该变量，缺失时该条注入记账报错、会话照常建成。
+# default_mcps。config 是框架 mcp_config 的完整 JSON（http_mcp：
+# {type, url, headers?, timeout?}；stdio_mcp：{type, command, args?,
+# env?, cwd?}），地址等直接写在这里，网关原样透传、不再经 env
+# 间接层（2026-11-14 定版）。旧条目的 url_env（网关 env 变量名）
+# 仍兼容，新登记一律用 config。
 mcp_servers:
   - name: demo-tools
-    transport: streamable_http
-    url_env: MCP_URL
+    config:
+      type: http_mcp
+      url: http://mcp-demo:8200/mcp
     owner: agent-base demo
     tenants: [demo-dev]
     scope: default
@@ -20,8 +24,9 @@ mcp_servers:
         level: ASK
         description: 向笔记文件追加一条笔记，正式写入，执行前人工确认。
   - name: tenant-a-tools
-    transport: streamable_http
-    url_env: MCP_URL
+    config:
+      type: http_mcp
+      url: http://mcp-demo:8200/mcp
     owner: tenant-a
     tenants: [tenant-a]
     scope: default

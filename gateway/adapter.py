@@ -648,13 +648,29 @@ class AgentScopeAdapter:
             if name in present_mcps:
                 report["mcp"][name] = "already_present"
                 continue
+            config = server.get("config")
+            if isinstance(config, dict) and config.get("type") in (
+                "http_mcp",
+                "stdio_mcp",
+            ):
+                # 整块透传：注册表的 config 就是框架 mcp_config 的
+                # 完整 JSON（url/headers/timeout 等都在 ConfigMap
+                # 里直配），网关只包 client_config 外壳，不拆不拼
+                # （2026-11-14 用户裁定，去掉 url_env 间接层）。
+                mcp_config = dict(config)
+            elif server.get("url_env"):
+                # 旧格式兼容：url_env 存网关 env 的变量名。
+                mcp_config = {
+                    "type": "http_mcp",
+                    "url": env(server["url_env"]),
+                }
+            else:
+                report["mcp"][name] = "failed:config-missing"
+                continue
             client_config: dict = {
                 "name": name,
                 "is_stateful": False,
-                "mcp_config": {
-                    "type": "http_mcp",
-                    "url": env(server.get("url_env", "")),
-                },
+                "mcp_config": mcp_config,
             }
             allow = (agent_mcp.get(name) or {}).get("allow") or []
             if allow:
@@ -686,7 +702,7 @@ class AgentScopeAdapter:
         # 教训：上传超时在 wstest 存在已久，因无日志一直没被发现）。
         for kind in ("mcp", "skills"):
             for item, result in report[kind].items():
-                if result.startswith(("error:", "http_")):
+                if result.startswith(("error:", "http_", "failed:")):
                     print(
                         f"[adapter] 注入失败 {kind}/{item}: {result} "
                         f"(tenant={session.tenant} "

@@ -81,7 +81,7 @@ chmod 600 .env                   # .env 永不入代码库、永不入包
 | `SERVICE_REDIS_MODE` / `GATEWAY_REDIS_MODE` | Redis 拓扑三模式：`standalone`（默认，HOST/PORT 直连）｜`sentinel`（配 `*_REDIS_SENTINELS` 地址组＋`*_REDIS_SENTINEL_MASTER` 服务名，切主自动跟随）｜`cluster`（配 `*_REDIS_CLUSTER_NODES` 启动节点组）。不写 MODE 时按地址变量推断；网关侧未设回退 `SERVICE_REDIS_*`。另 `*_REDIS_PASSWORD` 为主节点/集群密码。**限制：`SERVICE_STORAGE=redis` 不支持 cluster（框架存储有跨槽多键操作），cluster 下存储用 sql**；总线与网关状态三模式均支持 |
 | 协议钉版（代码内） | 服务与网关的全部 Redis 客户端构造均钉 `protocol=2`（RESP2）：redis-py 8 默认 RESP3、每次建连先发 `HELLO 3`，平台 Redis（6.0 以前或兼容引擎）不认 HELLO 会整连失败（2026-11-13 生产实测）。**哨兵模式有个坑**：redis-py 给哨兵节点自身建连接时只继承 `socket_*` 参数，钉在 master_for 上的 protocol 管不到它——哨兵连接照旧发 HELLO、死在 discover_master（同日二轮实测）；三处 Sentinel 构造已另行补 `sentinel_kwargs={"protocol": 2, ...}`。本栈命令面（Streams/Lua/Pub/Sub/Hash）纯 RESP2 语义，钉版无功能损失；换用原生高版本 Redis 也照常工作。注：wstest 的哨兵是真 Redis 7、认 HELLO，此坑只能靠假哨兵线级测试抓 |
 | `AGENT_BASE_USAGE_URL` | 计量库连接（生产：`mysql+pymysql://…`，与服务存储同 MySQL 实例即可）；未给时从 `SERVICE_DB_URL` 推导同库；`AGENT_BASE_USAGE_DB` 文件路径仅本地开发 |
-| `MCP_URL` | 网关侧变量：网关按注册表 `url_env` 解析的 MCP 地址（如 demo-tools）。service 不再读此变量；留空时引用它的注册表 MCP 注入失败（注入记账报错，会话本身照常建成） |
+| ~~`MCP_URL`~~ | 已退役（2026-11-14）：MCP 地址不再经网关 env，注册表条目的 `config` 整块直配（见第 6 节）。旧条目的 `url_env` 仍兼容，但新登记不要再加此变量 |
 | `AGENT_BASE_SKILLS_URL` | 动态技能仓储连接（生产：`mysql+pymysql://…`，可与服务存储同库，表 `gw_skills`/`gw_skill_versions` 首次使用时自动建）；未给时从 `SERVICE_DB_URL` 推导。仓储不可用时动态技能层整体跳过（静态技能不受影响），发布端点回 503 |
 | `GATEWAY_PLATFORM_TENANT` | 平台租户名：只有它能发布/管理 global（全租户通用）技能；未配则 global 发布关闭，本租户技能的发布不受影响 |
 | `SKILL_BLOB_BACKEND` | 技能包本体后端：`db`（默认，整包 zip 存 LONGBLOB，零新增基础设施）｜`s3`（内网 S3 兼容 OSS 只存工件、索引仍在库；须配 `SKILL_OSS_BUCKET`，可选 `SKILL_OSS_ENDPOINT_URL`/`SKILL_OSS_REGION`/`SKILL_OSS_ACCESS_KEY`/`SKILL_OSS_SECRET_KEY`） |
@@ -157,8 +157,9 @@ command 区分；配置经 ConfigMap/Secret 注入同一套 .env 变量）：
   页面永不直达；
 - **MySQL/Redis**：集群外置或集群内自建均可，连接信息走 Secret
   注入 `SERVICE_DB_URL` 与 `SERVICE_REDIS_HOST`；
-- **MCP 工具服务**：各自独立部署（Deployment＋Service），地址经
-  注册表分发，不与基座同 Pod。
+- **MCP 工具服务**：各自独立部署（Deployment＋Service）；连接配置
+  （地址/headers/timeout）整块写在注册表条目的 `config` 里随
+  ConfigMap 分发，不经网关 env、不与基座同 Pod。
 
 **集群实测（2026-11-08，InstaBox 上 kind 单节点集群，k8s
 1.34）**：原定四项附加验收已全部通过——①工作区 Pod/PVC 自动
@@ -215,7 +216,12 @@ python smoke_models.py      # 多模型：逐 Agent 组装/fallback 下发/带�
 ConfigMap 挂载到 `/config/registry`，见生产 YAML 的
 `agentbase-registry-configmap.yaml`）：外置后改 models/agent/
 MCP 登记只需更新 ConfigMap 并滚动重启网关，不必重出镜像；
-skills 实体（`skills_store/`）仍随镜像发布。
+skills 实体（`skills_store/`）仍随镜像发布。MCP 登记的
+`config` 字段是框架 mcp_config 的完整 JSON（http_mcp：
+`{type, url, headers?, timeout?}`；stdio_mcp：`{type, command,
+args?, env?, cwd?}`），网关建会话时原样透传给基座——加一个
+MCP 就是往 `mcp_servers.yaml` 加一条带 config 的登记，
+不再需要给网关配任何 env。
 
 ## 7. 生产清单（试部署转正式前逐项过）
 

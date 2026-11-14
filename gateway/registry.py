@@ -6,7 +6,8 @@ agent_registry/loader.py 是全量加载；本模块按租户过滤出「这个�
 （SOP 落库）。注册表仍是唯一事实来源，本模块不落任何状态。
 
 分工（注册与绑定分离）：
-- 登记在注册表：MCP 的连接模板（url_env 等）、工具级别、技能本体目录、
+- 登记在注册表：MCP 的连接配置（config 整块 JSON，框架 mcp_config
+  格式，网关原样透传；旧条目 url_env 仍兼容）、工具级别、技能本体目录、
   SOP 定义，全部带 tenant 归属与 scope（default/optional）标记；
 - 绑定在会话：网关建会话后按会话租户把 default 项注入该会话工作区
   （MCP 走 POST /workspace/mcp 全量直加，技能走 POST /workspace/skill/upload，
