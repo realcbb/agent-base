@@ -24,11 +24,40 @@ global 静态 < global 动态 < 本租户静态 < 本租户动态——租户专
 from pathlib import Path
 
 from agent_registry.loader import (
+    REGISTRY_DIR,
     SKILLS_STORE_DIR,
     load_mcp_servers,
     load_skills,
     load_sops,
 )
+from gateway.dep_check import normalize_name
+
+SKILL_ENV_MANIFEST_FILE = "skill_env_manifest.txt"
+
+
+def load_skill_env_manifest() -> dict[str, str] | None:
+    """工作区镜像技能公共环境的包清单（pip freeze 文本，name→version）。
+
+    文件 skill_env_manifest.txt 放注册表目录（生产随 ConfigMap 挂载，
+    内容从工作区镜像的 /opt/skill-python-manifest.txt 抽取），每次现读、
+    改完热生效。文件不存在返回 None——发布依赖检查据此进入未验模式
+    （见 gateway.dep_check 模块说明）。
+    """
+    path = REGISTRY_DIR / SKILL_ENV_MANIFEST_FILE
+    if not path.exists():
+        return None
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("-"):
+            continue
+        if " @ " in line:  # 直引 URL 形式：name @ file://...
+            name = line.split(" @ ", 1)[0].strip()
+            out[normalize_name(name)] = ""
+        elif "==" in line:
+            name, version = line.split("==", 1)
+            out[normalize_name(name.strip())] = version.strip()
+    return out
 
 
 def mcp_servers_for_tenant(tenant: str, scope: str | None = "default") -> list[dict]:

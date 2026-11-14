@@ -48,6 +48,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects import mysql
 
 from common.config import env, resolve_path
+from gateway.dep_check import parse_requires
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +188,10 @@ def validate_and_normalize_package(zip_bytes: bytes) -> dict:
             "SKILL.md frontmatter 的 name 缺失或不合法"
             "（须为字母数字开头、只含字母数字与 . _ -）",
         )
+    try:
+        requires = parse_requires(fm)
+    except ValueError as exc:
+        raise SkillPackageError(str(exc)) from exc
     manifest = [
         {
             "path": p,
@@ -204,6 +209,7 @@ def validate_and_normalize_package(zip_bytes: bytes) -> dict:
     return {
         "name": name,
         "description": str(fm.get("description") or ""),
+        "requires": requires,
         "manifest": manifest,
         "zip_bytes": out.getvalue(),
     }

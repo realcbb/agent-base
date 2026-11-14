@@ -91,6 +91,8 @@ chmod 600 .env                   # .env 永不入代码库、永不入包
 
 活会话按需装技能（2026-11-14）：`POST /v1/sessions/{id}/skills`（body：`name`，可选 `version`）把技能装进**已存在**会话的工作区，走服务侧原生 upload 通道。default/optional 均可装——optional 的定位就是建会话不装、用时再装，技能数涨到几百个时靠这条分档避免每会话全量灌入。动态技能缺省装当前版本、`version` 可指定历史版本（不存在回 404 `SKILL_VERSION_NOT_FOUND`）；静态技能无版本、传 `version` 回 400。重复装同名：先经服务侧 DELETE 按 SKILL.md 的 name 摘除旧副本再装入（框架 add_skill_archive 对重名目录只会加数字后缀、留双份，故由网关先摘）。技能对会话租户不可见回 404 `SKILL_NOT_FOUND`（不泄露他租户技能存在性）。
 
+技能依赖前置检查（2026-11-14）：SKILL.md frontmatter 可用 `requires` 声明直接依赖（`python: [pandas>=2.0, openpyxl]`、`mcp: [browser]` 两类），发布端点逐项核对：python 须被工作区镜像技能公共环境清单满足（清单文件 `skill_env_manifest.txt` 放注册表目录，内容从工作区镜像的 `/opt/skill-python-manifest.txt` 抽取、随 ConfigMap 挂载，网关每次现读、改完热生效），或技能包内自带兼容 wheel（Python 3.11：cp311/abi3/py3 通用轮；平台轮须 x86_64＋aarch64 双架构齐备）；mcp 须在注册表中对发布租户可见。不满足回 422 `SKILL_DEPS_UNSATISFIED` 并逐项报明原因，坏包不落库。清单文件缺失时 python 的镜像比对无从核对，未被 wheel 满足的项记 unverified 放行，发布响应以 `dependency_check: {manifest: "missing", unverified: [...]}` 显形，清单就位后自动转严格。声明本身不合法（未知类别、环境标记等）回 422 `SKILL_PACKAGE_INVALID`。activate/disable 不复检（版本在发布时已按当时清单核过）。
+
 ## 4. 启动
 
 裸机按顺序拉起（mcp_demo 可跳过）：

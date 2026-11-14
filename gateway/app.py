@@ -22,6 +22,8 @@ from gateway.adapter import (
     ModelCapabilityError,
     SessionBusyError,
 )
+from gateway import dep_check
+from gateway.registry import load_skill_env_manifest, mcp_servers_for_tenant
 from gateway.skill_store import (
     GLOBAL_TENANT as SKILL_GLOBAL_TENANT,
     SkillPackageError,
@@ -557,6 +559,27 @@ async def publish_skill(
         pkg = validate_and_normalize_package(await file.read())
     except SkillPackageError as exc:
         return _err(422, "SKILL_PACKAGE_INVALID", str(exc), trace_id)
+    # 依赖前置检查（2026-11-14）：requires 声明逐项对镜像技能环境清单
+    # （或包内 wheel）与注册表 MCP 名单；不满足 422 逐项报明。
+    # 清单未挂载时 python 镜像比对记 unverified 放行并在响应中显形。
+    image_manifest = load_skill_env_manifest()
+    visible_mcp = {
+        s.get("name") for s in mcp_servers_for_tenant(tenant, scope=None)
+    }
+    dep_report = dep_check.check_dependencies(
+        pkg["requires"],
+        [item["path"] for item in pkg["manifest"]],
+        image_manifest,
+        visible_mcp,
+    )
+    if dep_report["problems"]:
+        detail = "；".join(
+            f"{p['kind']}:{p['entry']}（{p['reason']}）"
+            for p in dep_report["problems"]
+        )
+        return _err(
+            422, "SKILL_DEPS_UNSATISFIED", f"依赖不满足：{detail}", trace_id,
+        )
     result = skill_store.publish(
         tenant=owner,
         name=pkg["name"],
@@ -569,6 +592,10 @@ async def publish_skill(
     )
     result["visibility"] = visibility
     result["description"] = pkg["description"]
+    result["dependency_check"] = {
+        "manifest": "loaded" if image_manifest is not None else "missing",
+        "unverified": dep_report["unverified"],
+    }
     return result
 
 
