@@ -209,13 +209,13 @@ python smoke_models.py      # 多模型：逐 Agent 组装/fallback 下发/带�
    `tenant-a.assistant.yaml`），模型登记在 `models.yaml`；MCP 工具登记
    `mcp_servers.yaml`、技能登记 `skills.yaml`（本体放 `skills_store/`）、
    SOP 登记 `sops.yaml`，均按其中的 `tenants/scope` 字段圈定归属；
-3. 改完先跑 `python agent_registry/validate_registry.py` 校验通过再重启；
-4. 注册表变更对**新建会话**即时生效，老会话不热换，属预期行为。
+3. 改完先跑 `python agent_registry/validate_registry.py` 校验通过；
+4. 注册表变更（含 models.yaml，网关每次解析现读）对**新建会话**即时生效、无需重启，老会话不热换，属预期行为。
 
 注：网关支持 `AGENT_REGISTRY_DIR` 把注册表整体外置（K8s 下用
 ConfigMap 挂载到 `/config/registry`，见生产 YAML 的
 `agentbase-registry-configmap.yaml`）：外置后改 models/agent/
-MCP 登记只需更新 ConfigMap 并滚动重启网关，不必重出镜像；
+MCP 登记只需更新 ConfigMap（卷同步后对新建会话现读生效），不必重出镜像、不必重启网关；
 skills 实体（`skills_store/`）仍随镜像发布。MCP 登记的
 `config` 字段是框架 mcp_config 的完整 JSON（http_mcp：
 `{type, url, headers?, timeout?}`；stdio_mcp：`{type, command,

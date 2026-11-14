@@ -187,7 +187,6 @@ class AgentScopeAdapter:
         self._system_credentials: dict[tuple[str, str, str], str] = {}
         self._sops_ensured: set[str] = set()
         self._sop_errors: dict[str, list[str]] = {}
-        self.models = load_models()
         # 模型口径与改造前一致：.env 齐备 OPENAI_BASE_URL+OPENAI_MODEL
         # 时走 OpenAI 兼容端点，否则 mock。
         if env("OPENAI_BASE_URL") and env("OPENAI_MODEL"):
@@ -211,6 +210,14 @@ class AgentScopeAdapter:
         self._session_locks: dict[str, asyncio.Lock] = {}
 
     # ------------------------------------------------------------- 基础
+    @property
+    def models(self) -> dict[str, dict]:
+        """模型目录现读：每次用时重读 models.yaml，与其余注册表
+        声明（agent/MCP/技能/SOP）同一口径——改文件对下一次解析
+        生效，不必重启网关。已建会话的模型在创建时已钉住，不受
+        影响。文件本身很小，逐次解析的开销可忽略。"""
+        return load_models()
+
     @staticmethod
     def _headers(tenant: str, end_user: str) -> dict:
         return {"X-Tenant-Id": tenant, "X-End-User-Id": end_user}
