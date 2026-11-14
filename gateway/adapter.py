@@ -173,7 +173,11 @@ class AdapterSession:
 @dataclass
 class _Provisioned:
     service_agent_id: str
-    chat_model_config: dict
+    # 兼容字段：仅 _system_provisioned 的 SOP 落库路径填充（SOP 定义
+    # 本就是进程内只落库一次，配置随定义钉住属预期）；普通会话路径
+    # 不用这两个字段——模型配置在 create_session 里逐会话现算，
+    # 保证注册表现读（改 models.yaml / Agent 声明）对新建会话生效。
+    chat_model_config: dict | None = None
     fallback_chat_model_config: dict | None = None
 
 
@@ -431,15 +435,11 @@ class AgentScopeAdapter:
         key = (tenant, end_user, agent_config["id"])
         if key in self._provisioned:
             return self._provisioned[key]
-        main_config, fallback_config = await self._session_model_configs(
-            tenant, agent_config,
-        )
+        # 这里只钉住服务侧 Agent 记录 id；模型配置不在供给时定格，
+        # 由 create_session 逐会话现算（见该方法），否则改注册表
+        # 对已供给过的 (租户, 用户, Agent) 不生效、仍要重启网关。
         service_agent_id = await self._ensure_agent(tenant, end_user, agent_config)
-        prov = _Provisioned(
-            service_agent_id=service_agent_id,
-            chat_model_config=main_config,
-            fallback_chat_model_config=fallback_config,
-        )
+        prov = _Provisioned(service_agent_id=service_agent_id)
         self._provisioned[key] = prov
         await self._ensure_tenant_sops(tenant)
         return prov
@@ -544,12 +544,20 @@ class AgentScopeAdapter:
         agent_config: dict,
     ) -> AdapterSession:
         prov = await self._ensure_provisioned(tenant, end_user, agent_config)
+        # 模型配置逐会话现算：注册表（models.yaml 与 Agent 的模型
+        # 声明）每次建会话现读现解，改完对新建会话即生效、不必
+        # 重启网关；已建会话的配置在创建时已钉在服务侧，不受
+        # 影响。凭据供给仍走 _session_model_configs 内的系统户
+        # 幂等 ensure（按条目缓存，只在新条目出现时才建新记录）。
+        main_config, fallback_config = await self._session_model_configs(
+            tenant, agent_config,
+        )
         body = {
             "agent_id": prov.service_agent_id,
-            "chat_model_config": prov.chat_model_config,
+            "chat_model_config": main_config,
         }
-        if prov.fallback_chat_model_config is not None:
-            body["fallback_chat_model_config"] = prov.fallback_chat_model_config
+        if fallback_config is not None:
+            body["fallback_chat_model_config"] = fallback_config
         # 知识库接线：Agent 在注册表以名字声明 knowledge_bases
         #（资产归租户系统户，经 TenantPrefixPolicy 同租户只读
         # 共享对终端用户可见），建会话时从该用户可见列表按名
@@ -573,7 +581,7 @@ class AgentScopeAdapter:
             end_user=end_user,
             agent_config=agent_config,
             service_agent_id=prov.service_agent_id,
-            model_name=prov.chat_model_config["model"],
+            model_name=main_config["model"],
             state=self.state,
             current_model_entry=agent_config["model"]["primary"],
         )
@@ -901,13 +909,19 @@ class AgentScopeAdapter:
             except httpx.HTTPError:
                 continue
             if r.status_code == 200:
+                # model_name 只是占位：紧接着的 _restore_session_model_state
+                # 会按服务侧会话记录把真实绑定模型覆盖回来（服务是事实
+                # 来源）。占位取当前注册表主条目的模型名，取不到退回
+                # 适配器默认名——恢复路径保持保守，不因注册表一时
+                # 不可用而失败。
+                _plan = self._model_plan_for(agent_config["model"]["primary"])
                 handle = AdapterSession(
                     session_id=session_id,
                     tenant=tenant,
                     end_user=end_user,
                     agent_config=agent_config,
                     service_agent_id=prov.service_agent_id,
-                    model_name=prov.chat_model_config["model"],
+                    model_name=(_plan or {}).get("model") or self.model_name,
                     state=self.state,
                     current_model_entry=agent_config["model"]["primary"],
                 )
