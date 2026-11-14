@@ -151,6 +151,9 @@ class AdapterSession:
     # 更新；vision_floor 一旦置位（本会话出现过图片）不再清除。
     current_model_entry: str = ""
     vision_floor: bool = False
+    # 建会话时显式指定的工作区 id（钉住，如 rpa-<工号>）；None 为
+    # 未指定、由服务侧隔离策略按会话分配。
+    workspace_id: str | None = None
     # 建会话时的按租户注入结果（MCP/技能各条的成败），仅网关内部簿记。
     injection_report: dict | None = None
     kb_report: dict | None = None
@@ -542,6 +545,7 @@ class AgentScopeAdapter:
         tenant: str,
         end_user: str,
         agent_config: dict,
+        workspace_id: str | None = None,
     ) -> AdapterSession:
         prov = await self._ensure_provisioned(tenant, end_user, agent_config)
         # 模型配置逐会话现算：注册表（models.yaml 与 Agent 的模型
@@ -556,6 +560,12 @@ class AgentScopeAdapter:
             "agent_id": prov.service_agent_id,
             "chat_model_config": main_config,
         }
+        # 工作区钉住（编排层口径）：显式传 workspace_id 时原生
+        # 建会话优先于隔离策略的按会话分配，同一工号的多次会话
+        # 共用同一工作区/PVC（框架 _k8s_safe_name 负责把任意
+        # 字符净化成合法 K8s 名）；不传则保持 PER_SESSION 分配。
+        if workspace_id:
+            body["workspace_id"] = workspace_id
         if fallback_config is not None:
             body["fallback_chat_model_config"] = fallback_config
         # 知识库接线：Agent 在注册表以名字声明 knowledge_bases
@@ -584,6 +594,7 @@ class AgentScopeAdapter:
             model_name=main_config["model"],
             state=self.state,
             current_model_entry=agent_config["model"]["primary"],
+            workspace_id=workspace_id,
         )
         self.sessions[session.session_id] = session
         session.kb_report = kb_report

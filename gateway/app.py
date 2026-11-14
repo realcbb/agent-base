@@ -57,6 +57,10 @@ app = FastAPI(title="agent-base gateway", version="1.0")
 
 class SessionCreate(BaseModel):
     agent_id: str
+    # 可选：钉住工作区 id（如编排层传 rpa-<工号>）。传了则同一
+    # 调用方的多次会话共用同一工作区/PVC；不传按服务侧隔离
+    # 策略逐会话分配。
+    workspace_id: str | None = None
 
 
 class SkillInstall(BaseModel):
@@ -254,12 +258,16 @@ async def create_session(
             404, "AGENT_NOT_FOUND", "agent not found for tenant",
             request.state.trace_id,
         )
-    session = await adapter.create_session(_tenant(request), x_end_user_id, agent_config)
+    session = await adapter.create_session(
+        _tenant(request), x_end_user_id, agent_config,
+        workspace_id=body.workspace_id,
+    )
     return {
         "session_id": session.session_id,
         "agent_id": agent_config["id"],
         "tenant": session.tenant,
         "end_user": session.end_user,
+        "workspace_id": session.workspace_id,
     }
 
 
