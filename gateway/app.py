@@ -595,6 +595,7 @@ async def publish_skill(
     result["dependency_check"] = {
         "manifest": "loaded" if image_manifest is not None else "missing",
         "unverified": dep_report["unverified"],
+        "redundant": dep_report["redundant"],
     }
     return result
 

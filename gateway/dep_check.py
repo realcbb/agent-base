@@ -10,9 +10,10 @@
 满足方只有两类（系统级的东西在工作区镜像构建时定死，不归这里管）：
 
 - python：工作区镜像技能公共环境的清单（pip freeze）里版本满足，
-  或技能包内自带兼容 wheel——解释器是 Python 3.11、生产/测试双架构
-  （arm64＋amd64），故纯轮（py3-none-any / cp311-abi3-any 等）直接可，
-  平台轮须 x86_64 与 aarch64 两份齐；
+  或技能包内自带兼容 wheel——解释器是 Python 3.11、生产为 arm64
+  单架构，故纯轮（py3-none-any / cp311-abi3-any 等）直接可，平台轮
+  须含 aarch64（x86_64 仅 wstest 测试环境用、带不带随意）；镜像已
+  满足又自带 wheel 的，在发布响应里记 redundant 提示多余、不拦截；
 - mcp：注册表里对发布租户可见的 MCP Server 名单里有这个名字。
 
 镜像清单缺失（还没随注册表 ConfigMap 挂进来）时，python 的镜像比对
@@ -142,43 +143,69 @@ def parse_requires(frontmatter: dict) -> dict:
     return out
 
 
-def _wheel_covers(path: str, want_name: str, clauses) -> tuple[bool, str]:
-    """包内某个 wheel 是否满足一条 python 依赖。返回 (是否满足, 说明)。"""
-    m = _WHEEL_RE.match(path.rsplit("/", 1)[-1])
-    if not m:
-        return False, "文件名不合 wheel 规范"
-    if normalize_name(m.group("dist")) != want_name:
-        return False, "包名不符"
-    if not satisfies(m.group("version"), clauses):
-        return False, f"wheel 版本 {m.group('version')} 不满足约束"
-    pys = m.group("py").split(".")
-    abis = m.group("abi").split(".")
-    interp_ok = False
-    for py in pys:
-        for abi in abis:
+def _interp_ok(py_tag: str, abi_tag: str) -> bool:
+    for py in py_tag.split("."):
+        for abi in abi_tag.split("."):
             if py in ("py3", "cp311", "cp3") or (
                 abi == "abi3"
                 and py.startswith("cp3")
                 and py[3:].isdigit()
                 and int(py[3:]) <= 311
             ):
-                interp_ok = True
-    if not interp_ok:
+                return True
+    return False
+
+
+def _wheel_set_verdict(
+    wheels: list[str], want_name: str, clauses,
+) -> tuple[bool, str]:
+    """包内同名 wheel 合起来判定一条 python 依赖是否被自带 wheel 满足。
+
+    专家在 x86 机器上用 pip download 按平台取轮，产物天然是一架构
+    一个文件，故架构覆盖按【集合】判：版本满足约束且解释器标签
+    兼容的文件里，有平台无关轮（any）即满足；否则须有生产架构
+    aarch64 的文件（x86_64 只影响 wstest 测试环境、缺了不拦）。
+    不满足返回给发布者看的原因。
+    """
+    seen = False
+    version_bad: str | None = None
+    interp_bad: str | None = None
+    arches: set[str] = set()
+    for path in wheels:
+        m = _WHEEL_RE.match(path.rsplit("/", 1)[-1])
+        if not m or normalize_name(m.group("dist")) != want_name:
+            continue
+        seen = True
+        if not satisfies(m.group("version"), clauses):
+            version_bad = m.group("version")
+            continue
+        if not _interp_ok(m.group("py"), m.group("abi")):
+            interp_bad = f"{m.group('py')}-{m.group('abi')}"
+            continue
+        plats = m.group("plat").split(".")
+        if any(p == "any" for p in plats):
+            return True, "ok"
+        if any("x86_64" in p for p in plats):
+            arches.add("x86_64")
+        if any("aarch64" in p for p in plats):
+            arches.add("aarch64")
+    if "aarch64" in arches:
+        return True, "ok"
+    if arches:
         return False, (
-            f"解释器标签 {m.group('py')}-{m.group('abi')} 与工作区 "
-            "Python 3.11 不兼容（须 cp311 / abi3 / py3 通用轮）"
+            "平台轮只有 x86_64，缺生产架构 aarch64"
+            "（或换 py3-none-any 通用轮）"
         )
-    plats = m.group("plat").split(".")
-    if any(p == "any" for p in plats):
-        return True, "ok"
-    has_x86 = any("x86_64" in p for p in plats)
-    has_arm = any("aarch64" in p for p in plats)
-    if has_x86 and has_arm:
-        return True, "ok"
-    return False, (
-        "平台轮须 x86_64 与 aarch64 双架构齐备"
-        f"（当前只有 {'x86_64' if has_x86 else 'aarch64' if has_arm else '其他平台'}）"
-    )
+    if interp_bad:
+        return False, (
+            f"解释器标签 {interp_bad} 与工作区 Python 3.11 不兼容"
+            "（须 cp311 / abi3 / py3 通用轮）"
+        )
+    if version_bad:
+        return False, f"wheel 版本 {version_bad} 不满足约束"
+    if seen:
+        return False, "wheel 文件名不合规范"
+    return False, "包内无 wheel"
 
 
 def check_dependencies(
@@ -187,31 +214,32 @@ def check_dependencies(
     image_manifest: dict[str, str] | None,
     visible_mcp: set[str],
 ) -> dict:
-    """逐项核对。返回 {"problems": [...], "unverified": [...]}，
-    条目形如 {"kind", "entry", "reason"}。problems 非空＝发布应拒绝。"""
+    """逐项核对。返回 {"problems", "unverified", "redundant"}，
+    条目形如 {"kind", "entry", "reason"}。problems 非空＝发布应拒绝；
+    redundant 是镜像已满足却又自带 wheel 的多余项（只提示不拦截）。"""
     problems: list[dict] = []
     unverified: list[dict] = []
+    redundant: list[dict] = []
     wheels = [p for p in package_paths if p.endswith(".whl")]
     for entry in requires.get("python", []):
         name, clauses = parse_python_requirement(entry)
-        wheel_ok, wheel_why = False, "包内无 wheel"
-        for w in wheels:
-            ok, why = _wheel_covers(w, name, clauses)
-            if ok:
-                wheel_ok = True
-                break
-            if why != "包名不符":
-                wheel_why = why
-        if wheel_ok:
-            continue
+        wheel_ok, wheel_why = _wheel_set_verdict(wheels, name, clauses)
         if image_manifest is None:
-            unverified.append({
-                "kind": "python", "entry": entry,
-                "reason": "镜像清单未配置，未核对镜像内置环境",
-            })
+            if not wheel_ok:
+                unverified.append({
+                    "kind": "python", "entry": entry,
+                    "reason": "镜像清单未配置，未核对镜像内置环境",
+                })
             continue
         have = image_manifest.get(name)
-        if have is not None and satisfies(have, clauses):
+        image_ok = have is not None and satisfies(have, clauses)
+        if image_ok and wheel_ok:
+            redundant.append({
+                "kind": "python", "entry": entry,
+                "reason": f"镜像技能环境已有 {have} 满足约束，包内 wheel 无需自带",
+            })
+            continue
+        if image_ok or wheel_ok:
             continue
         if have is not None:
             reason = f"镜像技能环境为 {have}，不满足约束；{wheel_why}"
@@ -224,4 +252,7 @@ def check_dependencies(
                 "kind": "mcp", "entry": name,
                 "reason": "注册表中无对本租户可见的同名 MCP Server",
             })
-    return {"problems": problems, "unverified": unverified}
+    return {
+        "problems": problems, "unverified": unverified,
+        "redundant": redundant,
+    }
